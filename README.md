@@ -1,7 +1,7 @@
 # Neural-DOCS
 
 Medical invoice processing system: upload a PDF, preprocess its pages, run
-Nanonets OCR2-1.5B-exp, reconstruct billing groups and rows, validate amounts,
+Nanonets OCR2-3B, reconstruct billing groups and rows, validate amounts,
 and send the result to human review.
 
 **Status:** The preprocessing, OCR integration, conservative HTML/Markdown
@@ -13,23 +13,37 @@ pending. No run is automatically approved. Design notes live in
 
 ## Nanonets OCR
 
-Run a local OpenAI-compatible vision server loaded with
-`nanonets/Nanonets-OCR2-1.5B-exp`. A launch script is provided at
-`scripts/start_nanonets_ocr2_1_5b.ps1`; it expects the quantized model and
-vision projector in `models/` and the existing llama.cpp binary in
-`D:\nanonets ocr\llama.cpp`.
-The local files come from the
-[OCR2-1.5B-exp GGUF conversion](https://huggingface.co/Mungert/Nanonets-OCR2-1.5B-exp-GGUF/tree/main):
-`Nanonets-OCR2-1.5B-exp-q8_0.gguf` and its matching `q8_0.mmproj`.
-They are excluded from Git. Their SHA256 hashes were checked against the
-repository metadata before the server was started.
-Set `NANONETS_BASE_URL` and, if your server uses an alias, `NANONETS_MODEL` in
-`backend/.env`. The default URL is `http://127.0.0.1:8090/v1`. After a
-preprocessing job completes, authenticated owners can start OCR with
+Open [`colab/nanonets_ocr2_3b.ipynb`](colab/nanonets_ocr2_3b.ipynb) in Google
+Colab using **File → Upload notebook**; do not paste its JSON into a code cell.
+To paste the setup into one cell in an existing notebook, copy
+[`colab/PASTE_IN_ONE_CELL.py`](colab/PASTE_IN_ONE_CELL.py). For separate cells,
+use [`colab/COPY_PASTE.md`](colab/COPY_PASTE.md). Select a GPU runtime and run
+the cells. You can add a `NANONETS_API_KEY` secret in Colab, or let the notebook
+generate one after tunnel setup. This is a shared gateway secret, not a
+Nanonets vendor API key. The notebook installs vLLM in an isolated Python 3.12
+environment using uv, loads the official
+[`nanonets/Nanonets-OCR2-3B`](https://huggingface.co/nanonets/Nanonets-OCR2-3B)
+model, runs an authenticated job gateway, and opens a temporary Cloudflare Quick
+Tunnel. The notebook includes an optional synthetic-image check. It prints a
+`NANONETS_BASE_URL` ending in `/v1`; copy that URL and the same API key into
+`backend/.env`, then restart Django. The tunnel setup uses HTTP/2 and retries
+transient connection failures. Keep the Colab runtime and tunnel running
+while processing invoices. Each new Colab session produces a new tunnel URL.
+Do not commit the API key or put real invoice data in notebook cells.
+
+The backend rejects missing URLs, unauthenticated remote connections, and
+non-HTTPS remote URLs before starting OCR. It posts pages to the gateway and
+polls for results, which avoids a long single HTTP request through Cloudflare.
+The vLLM server listens only on Colab loopback; only the key-protected gateway
+is tunnelled. On a shared or regulated deployment, use a durable GPU service
+and an access-controlled tunnel. Free Colab and Quick Tunnels can stop without
+warning, so they are suitable for temporary development runs.
+
+After a preprocessing job completes, authenticated owners can start OCR with
 `POST /api/preprocessing/jobs/<id>/ocr/` and poll `GET /api/ocr/jobs/<id>/`.
 In local demo mode, the API starts OCR in a separate local process, so Redis is
-not needed and the web request returns immediately. Keep the Nanonets model
-server running before clicking **Start OCR**. For a foreground run, use
+not needed and the web request returns immediately. Keep the Colab notebook
+running before clicking **Start OCR**. For a foreground run, use
 `python manage.py run_nanonets_ocr <preprocessing_job_id>`.
 Each page keeps the recognized text and the full server JSON response in storage.
 The raw OCR response is retained. Parsed values are checked with Decimal
@@ -80,17 +94,13 @@ and `backend/logs/invoice-<id>.log`; this directory is excluded from Git.
 For Celery deployment, configure Redis in `backend/.env` and run
 `celery -A config worker -l info --pool=solo` from `backend` on Windows.
 
-The 1.5B model is experimental; evaluate it on manually checked medical
-invoices before treating results as
+Evaluate the 3B model on manually checked medical invoices before treating results as
 reliable. The current parser does not support every invoice layout, and the
 same Nanonets model supplies OCR and judge verdicts, so the judge is not an
 independent model.
 
-A local synthetic invoice returned text plus an HTML table. A billing crop
-from a scanned invoice yielded eight groups and thirteen item rows; Decimal
-checks flagged three amounts that OCR had mixed with section totals. The crop
-took about 5.7 minutes on CPU. These observations are not a full invoice
-accuracy benchmark. See [the workflow notes](ai-rules/09-invoice-workflow.md).
+No full-invoice accuracy benchmark has been run with the Colab-hosted 3B model.
+See [the workflow notes](ai-rules/09-invoice-workflow.md).
 
 ## Quick start (backend)
 

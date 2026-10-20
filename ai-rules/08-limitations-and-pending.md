@@ -117,10 +117,12 @@
 - [ ] Orchestration: Redis broker, layer chaining, retries, stuck-job
       recovery, cross-layer status. Move the upload-to-Layer-1 hand-off out
       of `documents/views.py`.
-- [x] Layer 2: OCR integration with Nanonets OCR2-1.5B-exp. A synthetic page
-      and a real billing crop were traced locally; full invoice verification remains.
+- [x] Layer 2: OCR integration with Nanonets OCR2-3B via a Colab gateway.
+      Model and gateway startup were observed; a tunnel-connected 3B invoice
+      run and full invoice verification remain pending. Earlier synthetic and
+      billing-crop observations came from the local 1.5B model.
 - [x] Baseline invoice validation and human-review routing.
-- [ ] Benchmark Nanonets OCR2-1.5B-exp and the downstream parser on real medical invoices.
+- [ ] Benchmark Nanonets OCR2-3B and the downstream parser on real medical invoices.
 - [ ] Calibrate final validation and reconciliation on labelled medical invoices.
 - [ ] REST API: real authentication (tokens or sessions for the SPA), CORS,
       pagination, rate limits.

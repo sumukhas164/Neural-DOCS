@@ -173,11 +173,10 @@ PREPROCESSING = {
 }
 PREPROCESSING.setdefault("max_pages", MAX_DOCUMENT_PAGES)
 
-# Local OpenAI-compatible server loaded with Nanonets-OCR2-1.5B-exp.
-NANONETS_BASE_URL = os.environ.get("NANONETS_BASE_URL", "http://127.0.0.1:8090/v1")
-NANONETS_MODEL = os.environ.get("NANONETS_MODEL", "nanonets/Nanonets-OCR2-1.5B-exp")
-if "ocr2-3b" in NANONETS_MODEL.lower():
-    raise ImproperlyConfigured("OCR2-3B is no longer configured; use Nanonets OCR2-1.5B-exp")
+# Colab gateway exposes Nanonets OCR2-3B over an authenticated HTTPS tunnel.
+NANONETS_BASE_URL = os.environ.get("NANONETS_BASE_URL", "").strip()
+NANONETS_API_KEY = os.environ.get("NANONETS_API_KEY", "").strip()
+NANONETS_MODEL = os.environ.get("NANONETS_MODEL", "nanonets/Nanonets-OCR2-3B")
 NANONETS_TIMEOUT_SECONDS = int(os.environ.get("NANONETS_TIMEOUT_SECONDS", "1800"))
 NANONETS_MAX_TOKENS = int(os.environ.get("NANONETS_MAX_TOKENS", "8192"))
 

@@ -1,5 +1,23 @@
 # 05 - Project structure
 
+## Current application areas
+
+| Path | Responsibility |
+| --- | --- |
+| `backend/preprocessing/` | PDF rendering, image cleanup, page storage |
+| `backend/ocr/client.py` | Authenticated gateway requests and job polling |
+| `backend/ocr/services.py`, `tasks.py`, `views.py` | OCR jobs, persistence, API |
+| `backend/invoices/` | Structured extraction, Decimal validation, LangGraph workflow, review |
+| `frontend/` | React and Vite upload and review interface |
+| `colab/nanonets_gateway.py` | Authenticated asynchronous gateway in Colab |
+| `colab/build_notebook.py` | Generates the notebook and copy/paste setup files |
+| `colab/nanonets_ocr2_3b.ipynb` | Colab setup for OCR2-3B, vLLM, and Cloudflare Tunnel |
+| `colab/PASTE_IN_ONE_CELL.py` | Same setup as one copyable Python cell |
+
+## Layer 1 file detail
+
+The following tree expands the original preprocessing portion of the repo.
+
 ```
 Neural-DOCS/
 ├── README.md                     Quick start
@@ -61,7 +79,8 @@ Neural-DOCS/
 ```
 
 Not in git: `backend/.venv/`, `backend/.env`, `backend/media/`,
-`backend/db.sqlite3`, `backend/eval_output/`, `*.pth`.
+`backend/db.sqlite3`, `backend/eval_output/`, `backend/logs/`,
+`models/`, `*.pth`, `*.gguf`, and `*.mmproj`.
 
 ## Module responsibilities
 

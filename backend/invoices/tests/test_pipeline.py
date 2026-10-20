@@ -99,7 +99,7 @@ def test_run_and_human_correction(settings, django_capture_on_commit_callbacks):
     page.original_image.save("orig.png", ContentFile(b"\x89PNG\r\n\x1a\n"), save=False)
     page.processed_image.save("processed.png", ContentFile(b"\x89PNG\r\n\x1a\n"), save=False)
     page.save()
-    ocr = OcrJob.objects.create(preprocessing_job=prep, status="completed", model_name="nanonets/Nanonets-OCR2-1.5B-exp")
+    ocr = OcrJob.objects.create(preprocessing_job=prep, status="completed", model_name="nanonets/Nanonets-OCR2-3B")
     OcrPage.objects.create(job=ocr, source_page=page, page_number=1, text=OCR_TEXT)
     run = run_job(InvoiceRun.objects.create(ocr_job=ocr).pk)
     assert run.status == "needs_review"

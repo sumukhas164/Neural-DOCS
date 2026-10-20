@@ -23,7 +23,7 @@ Document orchestration and queue
         |
 Shared document-processing stages
   Layer 1  Preprocessing        PDF rendering, DRUNet/DnCNN/TV, deskewing, image quality checks
-  Layer 2  OCR                  Nanonets OCR2-1.5B-exp: page-level text and HTML tables
+  Layer 2  OCR                  Nanonets OCR2-3B via Colab gateway: page-level text and HTML tables
   Layer 3  Validation + routing OCR quality, layout checks, review routing
   Layer 4  Structured extraction  Conservative parser of OCR tables and headings
   Final validation and reconciliation
@@ -63,7 +63,7 @@ Layer 3's job.
 | Celery task for Layer 1 | Implemented as an integration point | Runs inline when no broker is configured |
 | MySQL | Configured | Apply new OCR and invoice migrations to the target database |
 | LangGraph invoice workflow | Implemented | OCR-to-review graph with persisted stage snapshots; no automatic resume yet |
-| Layer 2 OCR | Implemented | Nanonets OCR2-1.5B-exp via local compatible server; requires live invoice verification |
+| Layer 2 OCR | Implemented | Nanonets OCR2-3B via Colab gateway and Cloudflare Tunnel; requires live invoice verification |
 | Extraction, validation, judge, review | Implemented baseline | Real invoice evaluation and hardening pending |
 | React frontend | Implemented | Local Vite review interface |
 

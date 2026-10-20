@@ -2,14 +2,14 @@
 
 ## What is implemented
 
-- OCR uses the local `nanonets/Nanonets-OCR2-1.5B-exp` model through an
-  OpenAI-compatible llama.cpp server. The model and projector GGUF files are
-  ignored under `models/`; the old 3B weights were removed from the local
-  installation.
+- OCR uses `nanonets/Nanonets-OCR2-3B` on a Colab GPU through vLLM, an
+  authenticated job gateway, and a temporary Cloudflare Quick Tunnel.
+  `NANONETS_API_KEY` is a shared gateway secret, not a Nanonets vendor key.
+  Django posts each page and polls the gateway's job endpoint. No OCR model
+  weights are required on the local machine.
 - OCR stores one response per processed page, including the complete server
   JSON artifact. The model's message content is text with HTML tables where
-  it can identify them. No coordinates or confidence values were observed in
-  the synthetic local response.
+  it can identify them. Coordinates and confidence values must not be assumed.
 - `invoices.extraction` converts HTML or Markdown tables into a versioned
   `1.0` structure with page numbers, row order, billing groups, item kinds,
   source row text, and nullable amounts. It preserves cross-page group
@@ -27,7 +27,7 @@
 - React displays progress, groups, items, source page images, findings, and
   audit history. Images use authenticated API routes.
 
-## Live local observations
+## Earlier local 1.5B observations (not a 3B benchmark)
 
 - A synthetic invoice produced plain text and an HTML table inside the
   OpenAI-compatible response's `choices[0].message.content`. It did not
@@ -50,6 +50,10 @@
 
 - There is no manually verified invoice dataset or calibrated accuracy result.
 - No full invoice was processed end to end after the model switch.
+- The Colab runtime and Quick Tunnel URL are temporary. A new session needs a
+  new URL in `backend/.env`; Django must restart after configuration changes.
+- The gateway key must match in Colab and Django. It protects the public
+  tunnel but is not a Nanonets vendor API credential. Never commit or share it.
 - The conservative parser will miss rows in unsupported layouts; missing rows
   cannot be reliably detected without source annotations.
 - The graph stores stage snapshots but cannot automatically resume a crashed

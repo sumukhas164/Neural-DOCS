@@ -21,6 +21,11 @@
 | `PREPROCESSING_TILE_SIZE` | `512` | Tile side, multiple of 8 |
 | `PREPROCESSING_DEVICE` | `auto` | `auto`, `cpu`, `cuda` |
 | `LOG_LEVEL` | `INFO` | Root log level |
+| `NANONETS_BASE_URL` | empty | Current Colab Quick Tunnel HTTPS URL ending in `/v1` |
+| `NANONETS_API_KEY` | empty | Secret shared with the Colab gateway; not a vendor API key |
+| `NANONETS_MODEL` | `nanonets/Nanonets-OCR2-3B` | vLLM served model ID |
+| `NANONETS_TIMEOUT_SECONDS` | `1800` | Overall page OCR timeout, including gateway polling |
+| `NANONETS_MAX_TOKENS` | `8192` | Maximum model response tokens |
 
 `settings.PREPROCESSING` is a dict of overrides for `PreprocessingConfig`.
 Any field can be set there in code; only the six above have environment
@@ -61,18 +66,19 @@ means an engineering default that the paper does not specify.
 ## Running things
 
 All commands run from `backend/` with the virtual environment's Python.
+On Windows, use `.\.venv\Scripts\python.exe` explicitly so a system Python
+without Celery does not launch Django.
 
 ```powershell
 # Layer 1 on a file, no database needed
-python manage.py preprocess_pdf scan.pdf --output-dir out [--denoiser tv] [--sigma-mode fixed --fixed-sigma 0.1] [--dpi 200] [--max-pages 3] [--no-deskew] [--save-original]
+.\.venv\Scripts\python.exe manage.py preprocess_pdf scan.pdf --output-dir out [--denoiser tv] [--sigma-mode fixed --fixed-sigma 0.1] [--dpi 200] [--max-pages 3] [--no-deskew] [--save-original]
 
 # The paper's benchmark on a folder of clean scans
-python manage.py evaluate_denoisers clean_scans/ --output eval_output/results.csv [--algorithms drunet tv] [--sigmas 0.05 0.1 0.2] [--size 512] [--no-lpips]
+.\.venv\Scripts\python.exe manage.py evaluate_denoisers clean_scans/ --output eval_output/results.csv [--algorithms drunet tv] [--sigmas 0.05 0.1 0.2] [--size 512] [--no-lpips]
 
 # Server
-python manage.py migrate
-python manage.py createsuperuser
-python manage.py runserver
+.\.venv\Scripts\python.exe manage.py migrate
+.\.venv\Scripts\python.exe manage.py runserver
 
 # Worker (only when CELERY_BROKER_URL is set)
 celery -A config worker --pool=solo -l info
@@ -81,12 +87,20 @@ celery -A config worker --pool=solo -l info
 `--pool=solo` is needed on Windows, where Celery's default pool is not
 supported.
 
+For the local demo, Django can run without a superuser. If account login is
+enabled, create a regular user as shown in the root README. Run the Colab
+notebook first, then set `NANONETS_BASE_URL` and `NANONETS_API_KEY` in the
+ignored `backend/.env`, restart Django, and start OCR from the React app.
+The Colab notebook's generated key is printed only after the tunnel is ready.
+The tunnel uses HTTP/2 and retries startup; its URL changes after a new
+Colab session. Do not include the key in logs, commits, or screenshots.
+
 ## Testing
 
 ```powershell
-python -m pytest                    # all 138 tests
-python -m pytest -m "not models"    # 128 tests, no pretrained weights, about 40 s on CPU
-python -m pytest -m models          # 10 tests using DRUNet, DnCNN and LPIPS, about 65 s on CPU
+.\.venv\Scripts\python.exe -m pytest                 # full backend suite
+.\.venv\Scripts\python.exe -m pytest -m "not models" # skip pretrained-weight tests
+.\.venv\Scripts\python.exe -m pytest -m models       # deep denoiser model tests
 ```
 
 Tests use `config/settings_test.py`: in-memory SQLite, a temporary media
@@ -108,13 +122,17 @@ against MySQL instead.
 | `test_metrics_evaluation.py` | 10 | The six metrics by name, ordering with noise, MSE and PSNR against their formulas, MS-SSIM on small images, LPIPS, the benchmark protocol and summary, image loading |
 | `test_services.py` | 9 | Settings-driven config, job creation, stored files and metadata, idempotent start, failure recording, Celery task, on-commit dispatch, both management commands |
 | `documents/tests/test_api.py` | 15 | Authentication required, successful upload through to completed job, four kinds of invalid upload, size and page limits, per-user isolation, re-run with options, rejected options |
+| `ocr/tests/test_ocr.py` | varies | Gateway URL and key validation, OCR request/polling, OCR jobs |
+| `invoices/tests/test_pipeline.py` | varies | Extraction, validation, judge workflow, review API |
+| `colab/test_gateway.py` | 1 | Gateway authentication, job polling, and model response flow |
 
-### Last full run
+### Latest verification
 
-138 passed (128 + 10), Python 3.11.0, Windows 11, CPU only, SQLite. Run as
-two groups the suite took about 40 s and 65 s; a single combined run on the
-8 GB dev laptop took about 8 minutes, so timings vary widely with memory
-pressure.
+The current backend suite passed with `129 passed, 10 deselected` using
+`-m "not models"` on Windows and SQLite. The gateway test passed separately.
+The ten pretrained-weight tests and a live Colab-to-Django invoice run were
+not rerun for this change. The earlier 138-test full run predates the OCR2-3B
+integration and does not verify it.
 
 ### Not covered by automated tests
 

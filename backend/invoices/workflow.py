@@ -90,7 +90,8 @@ def judge_discrepancies(state: InvoiceState):
             try:
                 with page.source_page.processed_image.open("rb") as handle:
                     raw = ask(handle.read(), question, url=settings.NANONETS_BASE_URL,
-                              model=job.model_name, timeout=settings.NANONETS_TIMEOUT_SECONDS,
+                              model=job.model_name, api_key=settings.NANONETS_API_KEY,
+                              timeout=settings.NANONETS_TIMEOUT_SECONDS,
                               max_tokens=min(settings.NANONETS_MAX_TOKENS, 128))
                 answer = raw["choices"][0]["message"]["content"]
                 verdict = (_amount_verdict(answer, expected) if answer_kind == "amount"

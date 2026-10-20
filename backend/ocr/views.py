@@ -9,6 +9,7 @@ from preprocessing.models import PreprocessingJob
 from .models import OcrJob
 from .serializers import OcrJobSerializer
 from .services import submit_job
+from .client import OcrError, validate_connection
 
 
 class OcrJobViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet):
@@ -26,6 +27,10 @@ class StartOcrView(APIView):
             return Response({"detail": "Preprocessing must complete before OCR"}, status=409)
         if settings.CELERY_TASK_ALWAYS_EAGER and not settings.LOCAL_DEMO_MODE:
             return Response({"detail": "Configure a Celery broker and worker for API OCR; use the run_nanonets_ocr management command for local runs."}, status=503)
+        try:
+            validate_connection(settings.NANONETS_BASE_URL, settings.NANONETS_API_KEY)
+        except OcrError as exc:
+            return Response({"detail": str(exc)}, status=503)
         job = submit_job(source)
         return Response(OcrJobSerializer(job, context={"request": request}).data,
                         status=status.HTTP_202_ACCEPTED)

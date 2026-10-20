@@ -15,7 +15,17 @@
 | Python | 3.11 | The paper used 3.10; 3.11 was chosen for wheel availability. 3.10 and 3.13 are also installed on the dev machine but untested. |
 | MySQL | 8.0 | Local Windows service `MySQL80` |
 | Redis | not installed | Only needed once Celery runs with a real broker |
-| GPU | none on the dev machine | Everything was developed and tested on CPU |
+| GPU | Colab GPU for OCR2-3B; none on the dev machine | Local preprocessing and tests run on CPU |
+
+## OCR deployment
+
+`nanonets/Nanonets-OCR2-3B` runs under vLLM in a Colab Python 3.12 virtual
+environment. A small Python gateway accepts authenticated requests, queues
+inference, and exposes job polling. Cloudflare Quick Tunnel connects the
+gateway to Django over HTTPS; the model server listens on Colab loopback only.
+The key is generated locally or supplied through Colab Secrets. It is a
+gateway password, not a Nanonets account credential. See
+`colab/PASTE_IN_ONE_CELL.py` and `backend/.env.example`.
 
 ## Python dependencies (`backend/requirements.txt`)
 

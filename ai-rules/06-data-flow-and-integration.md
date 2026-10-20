@@ -22,6 +22,21 @@ When `CELERY_BROKER_URL` is empty (the default), the task runs inline in the
 web process straight after the upload transaction commits. With a broker
 configured it runs on a Celery worker.
 
+## Current OCR and invoice continuation
+
+After preprocessing completes, `POST /api/preprocessing/jobs/<id>/ocr/`
+creates an OCR job. In local demo mode, a separate local process reads each
+processed PNG, sends it with a Bearer gateway key through the current
+Cloudflare Quick Tunnel, and polls the Colab gateway until vLLM returns OCR2-3B
+text. The full model response is stored per page. The API exposes progress at
+`GET /api/ocr/jobs/<id>/`.
+
+The invoice workflow reconstructs billing groups and item rows from OCR text,
+checks arithmetic with Decimal, asks targeted questions of the same model for
+uncertain rows, and routes every run to human review. `backend/invoices/`
+stores stage events and reviewer edits. Its judge is not independent of the
+OCR model. See `09-invoice-workflow.md` for the current limits.
+
 ## Input
 
 | Property | Requirement | Enforced in |
@@ -108,7 +123,7 @@ Options a client may set on a re-run: `denoiser`, `sigma_mode`,
 Errors: `400` validation (message under the field name), `401/403`
 unauthenticated, `404` not found or not owned.
 
-## Integration points for the next layers
+## Layer 1 hand-off and remaining integration work
 
 ### Layer 2 (OCR) consumes
 
@@ -139,7 +154,9 @@ mean (re-scan request, human review, proceed).
 - Retries. `run_job` deliberately does not retry and does not raise: it
   records `failed` with `error_message`. A failed job is not re-runnable
   (only `pending` jobs start); create a new job to retry.
-- Status tracking across layers. Today only the Layer 1 job has a status.
+- Unified status and automatic recovery across layers. Preprocessing, OCR,
+  and invoice runs each have status, but there is no durable cross-layer
+  coordinator or automatic resume after a crash.
 
 ### Frontend consumes
 

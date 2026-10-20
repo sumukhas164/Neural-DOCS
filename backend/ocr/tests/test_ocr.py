@@ -8,7 +8,7 @@ from django.test import override_settings
 from rest_framework.test import APIClient
 
 from documents.models import Document
-from ocr.client import OcrError, recognize
+from ocr.client import OcrError, recognize, validate_connection
 from ocr.models import OcrJob
 from ocr.services import run_job
 from preprocessing.models import PreprocessedPage, PreprocessingJob
@@ -25,15 +25,53 @@ def test_client_sends_png_and_retains_response():
 
     with patch("ocr.client.request.urlopen", return_value=Response()) as call:
         result = recognize(b"\x89PNG\r\n\x1a\nimage", url="http://127.0.0.1:8090/v1",
-                           model="nanonets/Nanonets-OCR2-1.5B-exp", timeout=3, max_tokens=100)
+                           model="nanonets/Nanonets-OCR2-3B", timeout=3, max_tokens=100)
     sent = json.loads(call.call_args.args[0].data)
-    assert sent["model"] == "nanonets/Nanonets-OCR2-1.5B-exp"
+    assert sent["model"] == "nanonets/Nanonets-OCR2-3B"
     assert sent["messages"][0]["content"][0]["image_url"]["url"].startswith("data:image/png;base64,")
     assert result["choices"][0]["message"]["content"] == "<table>bill</table>"
     with pytest.raises(OcrError):
         recognize(b"wrong", url="http://127.0.0.1:8090/v1", model="nanonets", timeout=3, max_tokens=100)
 
 
+def test_remote_gateway_requires_https_key_and_polls_with_auth():
+    for url, key in [("http://example.com/v1", "secret"), ("https://example.com/v1", "")]:
+        with pytest.raises(OcrError):
+            validate_connection(url, key)
+
+    class Response:
+        def __init__(self, status, body):
+            self.status, self.body = status, body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def read(self):
+            return json.dumps(self.body).encode()
+
+    job_id = "e02e903e-b4a8-49d5-aa37-d6663ce3eb57"
+    responses = [
+        Response(202, {"id": job_id}),
+        Response(202, {"id": job_id, "status": "running"}),
+        Response(200, {"choices": [{"message": {"content": "<table>done</table>"}}]}),
+    ]
+    with patch("ocr.client.request.urlopen", side_effect=responses) as open_url, \
+         patch("ocr.client.time.sleep"):
+        result = recognize(b"\x89PNG\r\n\x1a\nimage", url="https://example.com/v1/",
+                           model="nanonets/Nanonets-OCR2-3B", api_key="secret",
+                           timeout=30, max_tokens=100)
+    assert result["choices"][0]["message"]["content"] == "<table>done</table>"
+    assert open_url.call_count == 3
+    for call in open_url.call_args_list:
+        assert call.args[0].get_header("Authorization") == "Bearer secret"
+    assert open_url.call_args_list[0].args[0].full_url == "https://example.com/v1/chat/completions"
+    assert open_url.call_args_list[1].args[0].full_url.endswith("/v1/jobs/" + job_id)
+
+
+@override_settings(NANONETS_BASE_URL="http://127.0.0.1:8090/v1", NANONETS_API_KEY="")
 @pytest.mark.django_db
 def test_ocr_job_keeps_raw_response_and_page_order(django_capture_on_commit_callbacks):
     user = get_user_model().objects.create_user("ocr_user", password="pw")
@@ -53,7 +91,7 @@ def test_ocr_job_keeps_raw_response_and_page_order(django_capture_on_commit_call
         {"choices": [{"message": {"content": "page one"}, "finish_reason": "stop"}]},
         {"choices": [{"message": {"content": "page two"}, "finish_reason": "stop"}]},
     ]):
-        job = run_job(OcrJob.objects.create(preprocessing_job=source, model_name="nanonets/Nanonets-OCR2-1.5B-exp").pk)
+        job = run_job(OcrJob.objects.create(preprocessing_job=source, model_name="nanonets/Nanonets-OCR2-3B").pk)
     assert job.status == "completed" and job.pages_done == 2
     assert list(job.pages.values_list("text", flat=True)) == ["page one", "page two"]
     first = job.pages.first()
@@ -64,6 +102,9 @@ def test_ocr_job_keeps_raw_response_and_page_order(django_capture_on_commit_call
     client.force_authenticate(user=user)
     assert client.get(f"/api/ocr/jobs/{job.pk}/").status_code == 200
     assert client.post(f"/api/preprocessing/jobs/{source.pk}/ocr/").status_code == 503
+    with override_settings(NANONETS_BASE_URL="", LOCAL_DEMO_MODE=True):
+        response = client.post(f"/api/preprocessing/jobs/{source.pk}/ocr/")
+        assert response.status_code == 503 and "NANONETS_BASE_URL" in response.data["detail"]
     with override_settings(LOCAL_DEMO_MODE=True), patch("config.local_jobs.launch") as launch:
         with django_capture_on_commit_callbacks(execute=True):
             response = client.post(f"/api/preprocessing/jobs/{source.pk}/ocr/")

@@ -49,7 +49,8 @@ def run_job(job_id):
             else:
                 with page.processed_image.open("rb") as handle:
                     result = recognize(handle.read(), url=settings.NANONETS_BASE_URL,
-                                       model=job.model_name, timeout=settings.NANONETS_TIMEOUT_SECONDS,
+                                       model=job.model_name, api_key=settings.NANONETS_API_KEY,
+                                       timeout=settings.NANONETS_TIMEOUT_SECONDS,
                                        max_tokens=settings.NANONETS_MAX_TOKENS)
                 choice = result["choices"][0]
                 if choice.get("finish_reason") == "length":
