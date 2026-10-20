@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 
 function csrf() {
   return document.cookie.split('; ').find(part => part.startsWith('csrftoken='))?.split('=')[1] || ''
