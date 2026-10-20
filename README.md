@@ -49,6 +49,11 @@ Each page keeps the recognized text and the full server JSON response in storage
 The raw OCR response is retained. Parsed values are checked with Decimal
 arithmetic and routed to review; the judge cannot overwrite them.
 
+If a dense page reaches the model's context limit, OCR retries that page at
+smaller image sizes while keeping the complete page in view. The stored raw
+artifact includes the truncated attempts and the selected retry response.
+Every extracted value still requires human review.
+
 ## Extraction and review
 
 `POST /api/ocr/jobs/<id>/extract/` creates an

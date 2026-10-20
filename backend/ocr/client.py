@@ -75,7 +75,16 @@ def ask(image: bytes, prompt: str, *, url: str, model: str, timeout: int,
                 raise OcrError(f"Nanonets OCR timed out after {timeout} seconds")
             time.sleep(min(3, remaining))
             poll = request.Request(base_url + "/jobs/" + job_id, headers=headers, method="GET")
-            status, result = _read_response(poll, min(30, max(1, deadline - time.monotonic())))
+            try:
+                status, result = _read_response(poll, min(30, max(1, deadline - time.monotonic())))
+            except OcrError as exc:
+                # A slow tunnel response does not cancel the job running in Colab.
+                cause = exc.__cause__
+                if isinstance(cause, TimeoutError) or (
+                    isinstance(cause, error.URLError) and isinstance(cause.reason, TimeoutError)
+                ):
+                    continue
+                raise
             if status != 202:
                 break
     try:

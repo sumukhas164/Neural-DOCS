@@ -2,12 +2,14 @@
 
 import json
 import logging
+from io import BytesIO
 from time import monotonic
 
 from django.conf import settings
 from django.core.files.base import ContentFile
 from django.db import transaction
 from django.utils import timezone
+from PIL import Image
 
 from preprocessing.models import PreprocessingJob
 
@@ -15,6 +17,47 @@ from .client import OcrError, recognize
 from .models import OcrJob, OcrPage
 
 logger = logging.getLogger(__name__)
+OCR_RETRY_MAX_EDGES = (2600, 2200)
+
+
+def _downscaled_png(image: bytes, max_edge: int) -> bytes | None:
+    """Reduce image tokens while keeping the complete page and its row order."""
+    with Image.open(BytesIO(image)) as source:
+        if max(source.size) <= max_edge:
+            return None
+        reduced = source.copy()
+    reduced.thumbnail((max_edge, max_edge), Image.Resampling.LANCZOS)
+    output = BytesIO()
+    reduced.save(output, format="PNG")
+    return output.getvalue()
+
+
+def _recognize_complete(image: bytes, *, page_number: int, model: str) -> tuple[dict, dict]:
+    """Retry a context-truncated page at lower resolution; retain every response."""
+    options = dict(url=settings.NANONETS_BASE_URL, model=model,
+                   api_key=settings.NANONETS_API_KEY,
+                   timeout=settings.NANONETS_TIMEOUT_SECONDS,
+                   max_tokens=settings.NANONETS_MAX_TOKENS)
+    result = recognize(image, **options)
+    if result["choices"][0].get("finish_reason") != "length":
+        return result, result
+
+    earlier = [{"image_max_edge": None, "response": result}]
+    for max_edge in OCR_RETRY_MAX_EDGES:
+        reduced = _downscaled_png(image, max_edge)
+        if reduced is None:
+            continue
+        logger.warning("OCR page %s was truncated; retrying at max edge %s pixels",
+                       page_number, max_edge)
+        result = recognize(reduced, **options)
+        if result["choices"][0].get("finish_reason") != "length":
+            artifact = {**result, "_ocr_retry": {
+                "selected_image_max_edge": max_edge,
+                "earlier_attempts": earlier,
+            }}
+            return result, artifact
+        earlier.append({"image_max_edge": max_edge, "response": result})
+    raise OcrError(f"Page {page_number} OCR was truncated after lower-resolution retries")
 
 
 def submit_job(preprocessing_job):
@@ -48,18 +91,14 @@ def run_job(job_id):
                 OcrPage.objects.create(job=job, source_page=page, page_number=page.page_number)
             else:
                 with page.processed_image.open("rb") as handle:
-                    result = recognize(handle.read(), url=settings.NANONETS_BASE_URL,
-                                       model=job.model_name, api_key=settings.NANONETS_API_KEY,
-                                       timeout=settings.NANONETS_TIMEOUT_SECONDS,
-                                       max_tokens=settings.NANONETS_MAX_TOKENS)
+                    result, artifact = _recognize_complete(
+                        handle.read(), page_number=page.page_number, model=job.model_name)
                 choice = result["choices"][0]
-                if choice.get("finish_reason") == "length":
-                    raise OcrError(f"Page {page.page_number} OCR was truncated")
                 ocr_page = OcrPage(job=job, source_page=page, page_number=page.page_number,
                                    text=choice["message"]["content"],
                                    finish_reason=choice.get("finish_reason") or "")
                 ocr_page.raw_response.save(f"page_{page.page_number:04d}.json",
-                                           ContentFile(json.dumps(result, ensure_ascii=False).encode("utf-8")), save=False)
+                                           ContentFile(json.dumps(artifact, ensure_ascii=False).encode("utf-8")), save=False)
                 ocr_page.save()
             job.pages_done += 1
             job.save(update_fields=["pages_done"])

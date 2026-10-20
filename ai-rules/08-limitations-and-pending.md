@@ -123,6 +123,8 @@
       billing-crop observations came from the local 1.5B model.
 - [x] Baseline invoice validation and human-review routing.
 - [ ] Benchmark Nanonets OCR2-3B and the downstream parser on real medical invoices.
+- [ ] Evaluate the legibility and amount accuracy of 2600/2200-pixel retries
+      on dense pages that exceed the Colab model's 12,288-token context window.
 - [ ] Calibrate final validation and reconciliation on labelled medical invoices.
 - [ ] REST API: real authentication (tokens or sessions for the SPA), CORS,
       pagination, rate limits.

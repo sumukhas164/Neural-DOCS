@@ -10,6 +10,10 @@
 - OCR stores one response per processed page, including the complete server
   JSON artifact. The model's message content is text with HTML tables where
   it can identify them. Coordinates and confidence values must not be assumed.
+- A `finish_reason=length` response is not accepted as complete. The backend
+  retries the entire page with a 2600-pixel maximum edge, then 2200 pixels if
+  needed. It stores earlier truncated responses under `_ocr_retry` in the raw
+  artifact. If every attempt truncates, the OCR job fails for review.
 - `invoices.extraction` converts HTML or Markdown tables into a versioned
   `1.0` structure with page numbers, row order, billing groups, item kinds,
   source row text, and nullable amounts. It preserves cross-page group
@@ -56,6 +60,8 @@
   tunnel but is not a Nanonets vendor API credential. Never commit or share it.
 - The conservative parser will miss rows in unsupported layouts; missing rows
   cannot be reliably detected without source annotations.
+- Downscaled OCR retries leave the whole page in view but can lose small text.
+  Check amounts against the source image during human review.
 - The graph stores stage snapshots but cannot automatically resume a crashed
   worker at its previous node. A fresh run can be created.
 - The local React interface relies on Django login. Production auth, object

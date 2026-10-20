@@ -1,7 +1,9 @@
 import json
+from io import BytesIO
 from unittest.mock import patch
 
 import pytest
+from PIL import Image
 from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
 from django.test import override_settings
@@ -10,7 +12,7 @@ from rest_framework.test import APIClient
 from documents.models import Document
 from ocr.client import OcrError, recognize, validate_connection
 from ocr.models import OcrJob
-from ocr.services import run_job
+from ocr.services import _recognize_complete, run_job
 from preprocessing.models import PreprocessedPage, PreprocessingJob
 
 
@@ -69,6 +71,54 @@ def test_remote_gateway_requires_https_key_and_polls_with_auth():
         assert call.args[0].get_header("Authorization") == "Bearer secret"
     assert open_url.call_args_list[0].args[0].full_url == "https://example.com/v1/chat/completions"
     assert open_url.call_args_list[1].args[0].full_url.endswith("/v1/jobs/" + job_id)
+
+
+def test_poll_timeout_does_not_cancel_colab_job():
+    from ocr.client import ask
+
+    job_id = "e02e903e-b4a8-49d5-aa37-d6663ce3eb57"
+    completed = {"choices": [{"message": {"content": "complete"}, "finish_reason": "stop"}]}
+    timeout_error = OcrError("Nanonets server request failed: timed out")
+    timeout_error.__cause__ = TimeoutError("timed out")
+    with patch("ocr.client._read_response", side_effect=[
+        (202, {"id": job_id}), timeout_error, (200, completed),
+    ]) as read_response, patch("ocr.client.time.sleep"):
+        result = ask(b"\x89PNG\r\n\x1a\nimage", "OCR", url="https://example.com/v1",
+                     model="nanonets/Nanonets-OCR2-3B", timeout=60, max_tokens=100,
+                     api_key="secret")
+    assert result == completed
+    assert read_response.call_count == 3
+
+
+def test_truncated_page_retries_at_lower_resolution_and_keeps_raw_attempts():
+    image = Image.new("RGB", (800, 3000), "white")
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+    truncated = {"choices": [{"message": {"content": "partial"}, "finish_reason": "length"}]}
+    complete = {"choices": [{"message": {"content": "all rows"}, "finish_reason": "stop"}]}
+
+    with patch("ocr.services.recognize", side_effect=[truncated, complete]) as recognize_call:
+        result, artifact = _recognize_complete(buffer.getvalue(), page_number=3, model="ocr2")
+
+    assert result == complete
+    assert recognize_call.call_count == 2
+    with Image.open(BytesIO(recognize_call.call_args_list[1].args[0])) as resized:
+        assert max(resized.size) == 2600
+    assert artifact["choices"] == complete["choices"]
+    assert artifact["_ocr_retry"]["earlier_attempts"][0]["response"] == truncated
+    assert artifact["_ocr_retry"]["selected_image_max_edge"] == 2600
+
+
+def test_truncated_page_fails_if_all_resolutions_are_truncated():
+    image = Image.new("RGB", (800, 3000), "white")
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+    truncated = {"choices": [{"message": {"content": "partial"}, "finish_reason": "length"}]}
+
+    with patch("ocr.services.recognize", return_value=truncated) as recognize_call:
+        with pytest.raises(OcrError, match="Page 3 OCR was truncated"):
+            _recognize_complete(buffer.getvalue(), page_number=3, model="ocr2")
+    assert recognize_call.call_count == 3
 
 
 @override_settings(NANONETS_BASE_URL="http://127.0.0.1:8090/v1", NANONETS_API_KEY="")
