@@ -5,15 +5,23 @@ function csrf() {
 }
 
 async function api(path, options = {}) {
-  const response = await fetch(path, {
-    credentials: 'same-origin',
-    ...options,
-    headers: { 'X-CSRFToken': csrf(), ...(options.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }), ...options.headers },
-  })
+  let response
+  try {
+    response = await fetch(path, {
+      credentials: 'same-origin',
+      ...options,
+      headers: { 'X-CSRFToken': csrf(), ...(options.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }), ...options.headers },
+    })
+  } catch {
+    throw new Error('Cannot reach the app server. Check that Django is running on 127.0.0.1:8000, then refresh.')
+  }
   if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      throw new Error('Sign in to Django to view or upload invoices.')
+    }
     let body = {}
     try { body = await response.json() } catch { /* non-JSON error */ }
-    throw new Error(body.detail || JSON.stringify(body) || `Request failed (${response.status})`)
+    throw new Error(body.detail || `Request failed (${response.status}). Check the Django terminal for details.`)
   }
   return response.json()
 }
@@ -114,9 +122,9 @@ export default function App() {
     setBusy(true)
     try { await api(path, { method: 'POST', body: '{}' }); await load() } catch (err) { setError(err.message) } finally { setBusy(false) }
   }
-  return <div className="shell"><header><div className="brand"><span className="mark">N</span><div><strong>Neural DOCS</strong><small>Medical invoice workspace</small></div></div><nav><a href="/api-auth/login/">Django sign in</a><button className="secondary" onClick={load}>Refresh</button></nav></header>
+  return <div className="shell"><header><div className="brand"><span className="mark">N</span><div><strong>Neural DOCS</strong><small>Medical invoice workspace</small></div></div><nav><a href="/api-auth/login/?next=/">Django sign in</a><button className="secondary" onClick={load}>Refresh</button></nav></header>
     <main><div className="intro"><div><p className="eyebrow">Invoice operations</p><h1>Review every charge with its source.</h1><p>Upload a medical invoice, run Nanonets OCR2, and resolve findings before accepting the result.</p></div><form onSubmit={upload} className="upload"><label htmlFor="file">New medical invoice PDF</label><input id="file" name="file" type="file" accept="application/pdf" required /><button disabled={busy}>Upload invoice</button></form></div>
-      {error && <p className="alert" role="alert">{error} <a href="/api-auth/login/">Sign in if needed</a></p>}
+      {error && <p className="alert" role="alert">{error} <a href="/api-auth/login/?next=/">Sign in</a></p>}
       <div className="layout"><section className="documents"><div className="section-title"><h2>Documents</h2><span>{documents.length}</span></div>{documents.length ? documents.map(doc => { const prep = preprocess.find(job => job.document === doc.id); const ocrJob = ocr.find(job => job.preprocessing_job === prep?.id); const run = runs.find(item => item.ocr_job === ocrJob?.id); return <article className="doc" key={doc.id}><div className="doc-top"><div><strong>{doc.original_filename}</strong><small>{doc.page_count} page{doc.page_count === 1 ? '' : 's'} · #{doc.id}</small></div><Status value={run?.status || ocrJob?.status || prep?.status} /></div><div className="steps"><span>1 Preprocess <Status value={prep?.status} /></span><span>2 Nanonets OCR <Status value={ocrJob?.status} /></span><span>3 Review <Status value={run?.status} /></span></div><div className="actions">{prep?.status === 'completed' && !ocrJob && <button disabled={busy} onClick={() => start(`/api/preprocessing/jobs/${prep.id}/ocr/`)}>Start OCR</button>}{ocrJob?.status === 'completed' && !run && <button disabled={busy} onClick={() => start(`/api/ocr/jobs/${ocrJob.id}/extract/`)}>Extract invoice</button>}{run && <button onClick={() => setSelected(run)}>Open review</button>}</div></article> }) : <p className="empty">No invoices yet. Upload a PDF to begin.</p>}</section><section className="detail">{selected ? <Review run={selected} refresh={load} /> : <div className="welcome"><div className="welcome-icon">⌁</div><h2>Review workspace</h2><p>Choose an extracted invoice to inspect its billing groups, source pages, checks, and reviewer history.</p></div>}</section></div>
     </main><footer>Neural DOCS · Medical invoices only · Human approval required</footer></div>
 }
