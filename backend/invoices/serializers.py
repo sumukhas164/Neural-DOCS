@@ -49,16 +49,33 @@ class StageEventSerializer(serializers.ModelSerializer):
 class InvoiceRunSerializer(serializers.ModelSerializer):
     groups = GroupSerializer(many=True, read_only=True)
     items = ItemSerializer(many=True, read_only=True)
+    structured_items = serializers.SerializerMethodField()
     findings = FindingSerializer(many=True, read_only=True)
     judge_findings = JudgeSerializer(many=True, read_only=True)
     review_events = ReviewEventSerializer(many=True, read_only=True)
     stage_events = StageEventSerializer(many=True, read_only=True)
 
+    def get_structured_items(self, run):
+        group_names = {group.pk: group.name for group in run.groups.all()}
+        rows = []
+        for item in run.items.all():
+            if item.kind != LineItem.Kind.ITEM:
+                continue
+            amount = item.net_amount if item.net_amount is not None else item.gross_amount
+            rows.append({
+                "item_name": item.name,
+                "billing_group": group_names.get(item.group_id),
+                "qty": str(item.quantity) if item.quantity is not None else None,
+                "rate": str(item.unit_rate) if item.unit_rate is not None else None,
+                "amount": str(amount) if amount is not None else None,
+            })
+        return rows
+
     class Meta:
         model = InvoiceRun
         fields = ["id", "ocr_job", "status", "stage", "schema_version", "extraction", "original_extraction",
                   "error_message", "created_at", "started_at", "finished_at",
-                  "groups", "items", "findings", "judge_findings", "review_events", "stage_events"]
+                  "groups", "items", "structured_items", "findings", "judge_findings", "review_events", "stage_events"]
 
 
 class ItemCorrectionSerializer(serializers.Serializer):

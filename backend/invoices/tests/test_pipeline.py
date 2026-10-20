@@ -105,11 +105,15 @@ def test_run_and_human_correction(settings):
         "reconstruct_structure", "validate_invoice", "judge_discrepancies"]
     client = APIClient()
     client.force_authenticate(user=user)
+    structured = client.get(f"/api/invoices/runs/{run.pk}/").data["structured_items"]
+    assert structured == [{"item_name": "Blood Test", "billing_group": "Laboratory Charges",
+                           "qty": "2.000", "rate": "50.00", "amount": "90.00"}]
     assert client.post(f"/api/ocr/jobs/{ocr.pk}/extract/").status_code == 503
     assert client.get(f"/api/preprocessing/pages/{page.pk}/processed.png").status_code == 200
     assert client.get(f"/api/invoices/runs/{run.pk}/pages/1/image/").status_code == 200
     response = client.patch(f"/api/invoices/runs/{run.pk}/items/r-1-1/", {"net_amount": "89.00", "note": "Checked scan"}, format="json")
     assert response.status_code == 200
+    assert response.data["structured_items"][0]["amount"] == "89.00"
     assert run.items.get(stable_id="r-1-1").net_amount == 89
     assert ReviewEvent.objects.filter(run=run, action="correct_item").count() == 1
     assert client.post(f"/api/invoices/runs/{run.pk}/decision/", {"decision": "approve", "note": "Verified"}, format="json").status_code == 409

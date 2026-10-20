@@ -43,6 +43,19 @@ row with `PATCH /api/invoices/runs/<id>/items/<stable_id>/` (a `note` is require
 and make a recorded decision with `POST /api/invoices/runs/<id>/decision/`.
 Processed source page images are served through an authenticated endpoint.
 
+The review page shows a structured table with item name, billing group, quantity,
+rate, and amount. The same rows are returned as `structured_items` by
+`GET /api/invoices/runs/<id>/` and can be downloaded as JSON from the page:
+
+```json
+[{"item_name":"Blood Test","billing_group":"Laboratory Charges","qty":"2.000","rate":"50.00","amount":"90.00"}]
+```
+
+`amount` is the net amount when present, otherwise the gross amount. Missing
+values stay `null`; subtotal and grand-total rows are excluded from this item
+list. A regular Django user can upload and review their own invoices. A
+superuser is not required for extraction or review.
+
 Without Redis, use `python manage.py process_invoice <ocr_job_id>` in the
 `backend` directory. API OCR and extraction requests return 503 while Celery
 runs eagerly, since model calls can take minutes and would block the web process.
@@ -88,9 +101,19 @@ CREATE DATABASE neural_docs CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 ```powershell
 .venv\Scripts\python manage.py migrate
-.venv\Scripts\python manage.py createsuperuser
 .venv\Scripts\python manage.py runserver
 ```
+
+To create a regular reviewer account, run `.venv\Scripts\python manage.py shell`
+and enter:
+
+```python
+from django.contrib.auth import get_user_model
+from getpass import getpass
+get_user_model().objects.create_user(username="reviewer", password=getpass("Password: "))
+```
+
+Then sign in through the React app. This account has no Django admin privileges.
 
 ## Try Layer 1 without the database
 
