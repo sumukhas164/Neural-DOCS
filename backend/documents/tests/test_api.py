@@ -3,8 +3,10 @@ import hashlib
 import pytest
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import override_settings
 from rest_framework.test import APIClient
 
+from config.local_auth import DEMO_USERNAME
 from documents.models import Document
 from preprocessing.models import PreprocessingJob
 from preprocessing.tests.helpers import make_page, make_pdf_bytes, rotate_ccw
@@ -40,6 +42,27 @@ def test_requires_authentication(pdf_bytes):
     assert anonymous.get("/api/documents/").status_code in (401, 403)
     assert anonymous.get("/api/preprocessing/jobs/").status_code in (401, 403)
     assert Document.objects.count() == 0
+
+
+@override_settings(DEBUG=True, LOCAL_DEMO_MODE=True)
+def test_local_demo_api_works_without_login_and_stays_on_loopback(pdf_bytes):
+    local = APIClient(HTTP_HOST="127.0.0.1")
+    assert local.get("/api/runtime/").data == {"local_demo_mode": True}
+    assert local.get("/api/documents/").status_code == 200
+
+    demo = get_user_model().objects.get(username=DEMO_USERNAME)
+    assert not demo.is_staff and not demo.is_superuser and not demo.has_usable_password()
+    response = upload(local, pdf_bytes, name="local.pdf")
+    assert response.status_code == 201
+    assert Document.objects.get(pk=response.data["id"]).uploaded_by == demo
+
+    remote = APIClient(HTTP_HOST="127.0.0.1", REMOTE_ADDR="192.0.2.1")
+    assert remote.get("/api/runtime/").data == {"local_demo_mode": False}
+    assert remote.get("/api/documents/").status_code in (401, 403)
+
+    with override_settings(DEBUG=False):
+        assert local.get("/api/runtime/").data == {"local_demo_mode": False}
+        assert local.get("/api/documents/").status_code in (401, 403)
 
 
 def test_upload_creates_document_and_runs_layer_1(

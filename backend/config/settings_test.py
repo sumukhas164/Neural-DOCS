@@ -25,3 +25,4 @@ MAX_DOCUMENT_PAGES = 5
 # the pipeline without a denoiser so the suite stays fast.
 PREPROCESSING = {"denoiser": "none", "render_dpi": 100, "max_pages": MAX_DOCUMENT_PAGES}
 PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
+LOCAL_DEMO_MODE = False

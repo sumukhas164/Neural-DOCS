@@ -11,4 +11,5 @@
 .items-table th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#596c7d;background:#edf4f4}
 .items-table td:nth-child(n+3){font-variant-numeric:tabular-nums;white-space:nowrap}
 .items-table tbody tr:last-child td{border-bottom:0}
+.mode-badge{border-radius:20px;padding:6px 10px;background:#e3f4ec;color:#23774d;font-size:12px;font-weight:700}
 @media(max-width:680px){.structured-head{display:block}.structured-head button{margin-bottom:14px}}

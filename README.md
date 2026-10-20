@@ -67,8 +67,11 @@ automatic resume after a worker crash is not implemented.
 ## Review interface
 
 In another terminal, run `cd frontend`, `npm install`, then `npm run dev`.
-Start Django on port 8000 first. Open the Vite URL, use **Django sign in**, then
-upload and review invoices. For actual background OCR, configure Redis in
+Start Django on `127.0.0.1:8000` first. With `DJANGO_DEBUG=true` and
+`LOCAL_DEMO_MODE=true` in `backend/.env`, open the Vite URL and upload invoices
+directly; no sign-in is needed. A dedicated non-admin local identity owns these
+documents. Local demo access is limited to loopback requests and disabled when
+debug mode is off. For actual background OCR, configure Redis in
 `backend/.env` and run `celery -A config worker -l info --pool=solo` from
 `backend` on Windows.
 
@@ -104,8 +107,8 @@ CREATE DATABASE neural_docs CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 .venv\Scripts\python manage.py runserver
 ```
 
-To create a regular reviewer account, run `.venv\Scripts\python manage.py shell`
-and enter:
+If local demo mode is disabled, create a regular reviewer account with
+`.venv\Scripts\python manage.py shell` and enter:
 
 ```python
 from django.contrib.auth import get_user_model
