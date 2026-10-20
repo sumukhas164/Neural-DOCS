@@ -2,6 +2,7 @@
 
 import json
 import logging
+from time import monotonic
 
 from django.conf import settings
 from django.core.files.base import ContentFile
@@ -20,8 +21,12 @@ def submit_job(preprocessing_job):
     if preprocessing_job.status != PreprocessingJob.Status.COMPLETED:
         raise ValueError("Preprocessing must complete before OCR")
     job = OcrJob.objects.create(preprocessing_job=preprocessing_job, model_name=settings.NANONETS_MODEL)
-    from .tasks import run_ocr_task
-    transaction.on_commit(lambda: run_ocr_task.delay(job.pk))
+    if settings.CELERY_TASK_ALWAYS_EAGER and settings.LOCAL_DEMO_MODE:
+        from config.local_jobs import launch
+        transaction.on_commit(lambda: launch("ocr", job.pk))
+    else:
+        from .tasks import run_ocr_task
+        transaction.on_commit(lambda: run_ocr_task.delay(job.pk))
     return job
 
 
@@ -31,10 +36,14 @@ def run_job(job_id):
     job = OcrJob.objects.select_related("preprocessing_job").get(pk=job_id)
     if not claimed:
         return job
+    logger.info("OCR job %s started with model %s", job_id, job.model_name)
     try:
         if job.preprocessing_job.status != PreprocessingJob.Status.COMPLETED:
             raise OcrError("Source preprocessing job is not completed")
         for page in job.preprocessing_job.pages.order_by("page_number"):
+            page_started = monotonic()
+            logger.info("OCR job %s processing page %s of %s", job_id, page.page_number,
+                        job.preprocessing_job.pages_total)
             if "blank_page" in page.quality_flags:
                 OcrPage.objects.create(job=job, source_page=page, page_number=page.page_number)
             else:
@@ -53,6 +62,8 @@ def run_job(job_id):
                 ocr_page.save()
             job.pages_done += 1
             job.save(update_fields=["pages_done"])
+            logger.info("OCR job %s completed page %s in %.1f seconds", job_id, page.page_number,
+                        monotonic() - page_started)
         job.status = OcrJob.Status.COMPLETED
     except Exception as exc:
         logger.exception("OCR job %s failed", job_id)
@@ -60,4 +71,5 @@ def run_job(job_id):
         job.error_message = f"{type(exc).__name__}: {exc}"[:2000]
     job.finished_at = timezone.now()
     job.save(update_fields=["status", "error_message", "finished_at"])
+    logger.info("OCR job %s finished with status %s (%s pages)", job_id, job.status, job.pages_done)
     return job

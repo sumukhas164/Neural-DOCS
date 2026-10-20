@@ -10,6 +10,7 @@ backend/.env
 backend/db.sqlite3
 backend/media/
 backend/staticfiles/
+backend/logs/
 
 # Model weights and evaluation outputs
 *.pth

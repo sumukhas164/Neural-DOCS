@@ -24,7 +24,7 @@ class StartOcrView(APIView):
                                    document__uploaded_by=request.user)
         if source.status != PreprocessingJob.Status.COMPLETED:
             return Response({"detail": "Preprocessing must complete before OCR"}, status=409)
-        if settings.CELERY_TASK_ALWAYS_EAGER:
+        if settings.CELERY_TASK_ALWAYS_EAGER and not settings.LOCAL_DEMO_MODE:
             return Response({"detail": "Configure a Celery broker and worker for API OCR; use the run_nanonets_ocr management command for local runs."}, status=503)
         job = submit_job(source)
         return Response(OcrJobSerializer(job, context={"request": request}).data,

@@ -27,8 +27,9 @@ Set `NANONETS_BASE_URL` and, if your server uses an alias, `NANONETS_MODEL` in
 `backend/.env`. The default URL is `http://127.0.0.1:8090/v1`. After a
 preprocessing job completes, authenticated owners can start OCR with
 `POST /api/preprocessing/jobs/<id>/ocr/` and poll `GET /api/ocr/jobs/<id>/`.
-The API requires a Celery broker and worker so a long OCR run cannot block the
-upload/API process. For a local foreground run without Redis, use
+In local demo mode, the API starts OCR in a separate local process, so Redis is
+not needed and the web request returns immediately. Keep the Nanonets model
+server running before clicking **Start OCR**. For a foreground run, use
 `python manage.py run_nanonets_ocr <preprocessing_job_id>`.
 Each page keeps the recognized text and the full server JSON response in storage.
 The raw OCR response is retained. Parsed values are checked with Decimal
@@ -36,7 +37,7 @@ arithmetic and routed to review; the judge cannot overwrite them.
 
 ## Extraction and review
 
-With a Celery broker and worker, `POST /api/ocr/jobs/<id>/extract/` creates an
+`POST /api/ocr/jobs/<id>/extract/` creates an
 invoice run. Poll `GET /api/invoices/runs/<id>/` for groups, items, validation
 findings, and judge verdicts. The authenticated document owner can correct a
 row with `PATCH /api/invoices/runs/<id>/items/<stable_id>/` (a `note` is required)
@@ -56,9 +57,10 @@ values stay `null`; subtotal and grand-total rows are excluded from this item
 list. A regular Django user can upload and review their own invoices. A
 superuser is not required for extraction or review.
 
-Without Redis, use `python manage.py process_invoice <ocr_job_id>` in the
-`backend` directory. API OCR and extraction requests return 503 while Celery
-runs eagerly, since model calls can take minutes and would block the web process.
+Local demo mode starts extraction in a separate local process without Redis.
+For a foreground run, use `python manage.py process_invoice <ocr_job_id>` in the
+`backend` directory. Outside local demo mode, API OCR and extraction need a
+configured Celery broker and worker.
 The workflow graph starts after OCR, reconstructs structure, validates, runs at
 most three targeted judge calls, and persists a reviewable result. It does not
 infer absent values or auto-approve a run. Stage snapshots are stored in MySQL;
@@ -71,9 +73,12 @@ Start Django on `127.0.0.1:8000` first. With `DJANGO_DEBUG=true` and
 `LOCAL_DEMO_MODE=true` in `backend/.env`, open the Vite URL and upload invoices
 directly; no sign-in is needed. A dedicated non-admin local identity owns these
 documents. Local demo access is limited to loopback requests and disabled when
-debug mode is off. For actual background OCR, configure Redis in
-`backend/.env` and run `celery -A config worker -l info --pool=solo` from
-`backend` on Windows.
+debug mode is off. In local demo mode, **Start OCR** and **Extract invoice** run
+in separate processes. The page shows page progress, failures, and retry
+buttons. Logs are written to `backend/logs/app.log`, `backend/logs/ocr-<id>.log`,
+and `backend/logs/invoice-<id>.log`; this directory is excluded from Git.
+For Celery deployment, configure Redis in `backend/.env` and run
+`celery -A config worker -l info --pool=solo` from `backend` on Windows.
 
 The 1.5B model is experimental; evaluate it on manually checked medical
 invoices before treating results as

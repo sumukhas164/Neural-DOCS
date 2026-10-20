@@ -4,6 +4,7 @@ from unittest.mock import patch
 import pytest
 from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
+from django.test import override_settings
 from rest_framework.test import APIClient
 
 from documents.models import Document
@@ -34,7 +35,7 @@ def test_client_sends_png_and_retains_response():
 
 
 @pytest.mark.django_db
-def test_ocr_job_keeps_raw_response_and_page_order():
+def test_ocr_job_keeps_raw_response_and_page_order(django_capture_on_commit_callbacks):
     user = get_user_model().objects.create_user("ocr_user", password="pw")
     document = Document.objects.create(uploaded_by=user, original_filename="scan.pdf",
                                        size_bytes=10, sha256="0" * 64, page_count=2,
@@ -63,6 +64,11 @@ def test_ocr_job_keeps_raw_response_and_page_order():
     client.force_authenticate(user=user)
     assert client.get(f"/api/ocr/jobs/{job.pk}/").status_code == 200
     assert client.post(f"/api/preprocessing/jobs/{source.pk}/ocr/").status_code == 503
+    with override_settings(LOCAL_DEMO_MODE=True), patch("config.local_jobs.launch") as launch:
+        with django_capture_on_commit_callbacks(execute=True):
+            response = client.post(f"/api/preprocessing/jobs/{source.pk}/ocr/")
+        assert response.status_code == 202
+        launch.assert_called_once_with("ocr", response.data["id"])
     other = get_user_model().objects.create_user("other", password="pw")
     client.force_authenticate(user=other)
     assert client.get(f"/api/ocr/jobs/{job.pk}/").status_code == 404

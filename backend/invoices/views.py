@@ -32,7 +32,7 @@ class StartInvoiceView(APIView):
                                 preprocessing_job__document__uploaded_by=request.user)
         if job.status != OcrJob.Status.COMPLETED:
             return Response({"detail": "OCR must complete before extraction"}, status=409)
-        if settings.CELERY_TASK_ALWAYS_EAGER:
+        if settings.CELERY_TASK_ALWAYS_EAGER and not settings.LOCAL_DEMO_MODE:
             return Response({"detail": "Configure a Celery broker and worker for API extraction; use the process_invoice management command locally."}, status=503)
         run = submit_run(job)
         return Response(InvoiceRunSerializer(run).data, status=status.HTTP_202_ACCEPTED)

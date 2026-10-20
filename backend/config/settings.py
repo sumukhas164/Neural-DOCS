@@ -147,8 +147,8 @@ DATA_UPLOAD_MAX_MEMORY_SIZE = MAX_UPLOAD_SIZE_BYTES
 MAX_DOCUMENT_PAGES = int(os.environ.get("MAX_DOCUMENT_PAGES", "50"))
 
 # --- Celery ----------------------------------------------------------------
-# Without a broker configured, tasks run inline in the calling process so the
-# pipeline is usable before the orchestration layer (workers + Redis) exists.
+# Preprocessing runs inline without a broker. Local demo OCR and invoice jobs
+# launch separate processes so long model calls do not block HTTP requests.
 CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "")
 CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", "") or None
 CELERY_TASK_ALWAYS_EAGER = env_bool("CELERY_TASK_ALWAYS_EAGER", not CELERY_BROKER_URL)
@@ -181,9 +181,20 @@ if "ocr2-3b" in NANONETS_MODEL.lower():
 NANONETS_TIMEOUT_SECONDS = int(os.environ.get("NANONETS_TIMEOUT_SECONDS", "1800"))
 NANONETS_MAX_TOKENS = int(os.environ.get("NANONETS_MAX_TOKENS", "8192"))
 
+LOCAL_LOG_DIR = BASE_DIR / "logs"
+LOCAL_LOG_DIR.mkdir(exist_ok=True)
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
-    "handlers": {"console": {"class": "logging.StreamHandler"}},
-    "root": {"handlers": ["console"], "level": os.environ.get("LOG_LEVEL", "INFO")},
+    "formatters": {"detailed": {"format": "%(asctime)s %(levelname)s %(name)s %(message)s"}},
+    "handlers": {
+        "console": {"class": "logging.StreamHandler", "formatter": "detailed"},
+        "file": {"class": "logging.FileHandler", "filename": str(LOCAL_LOG_DIR / "app.log"), "encoding": "utf-8", "formatter": "detailed"},
+    },
+    "root": {"handlers": ["console", "file"], "level": os.environ.get("LOG_LEVEL", "INFO")},
+    "loggers": {
+        "django.server": {"handlers": ["console", "file"], "level": "INFO", "propagate": False},
+        "django.request": {"handlers": ["console", "file"], "level": "WARNING", "propagate": False},
+    },
 }

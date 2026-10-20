@@ -17,8 +17,12 @@ def submit_run(ocr_job):
     if ocr_job.status != OcrJob.Status.COMPLETED:
         raise ValueError("OCR must complete before invoice extraction")
     run = InvoiceRun.objects.create(ocr_job=ocr_job)
-    from .tasks import process_invoice_task
-    transaction.on_commit(lambda: process_invoice_task.delay(run.pk))
+    if settings.CELERY_TASK_ALWAYS_EAGER and settings.LOCAL_DEMO_MODE:
+        from config.local_jobs import launch
+        transaction.on_commit(lambda: launch("invoice", run.pk))
+    else:
+        from .tasks import process_invoice_task
+        transaction.on_commit(lambda: process_invoice_task.delay(run.pk))
     return run
 
 
@@ -58,6 +62,7 @@ def run_job(run_id):
     run = InvoiceRun.objects.select_related("ocr_job").get(pk=run_id)
     if not claimed:
         return run
+    logger.info("Invoice run %s started", run_id)
     try:
         state = {"ocr_job_id": run.ocr_job_id}
         for update in build_graph().stream(state, stream_mode="updates"):
@@ -67,6 +72,7 @@ def run_job(run_id):
                 run.checkpoint_state = state
                 run.save(update_fields=["stage", "checkpoint_state"])
                 StageEvent.objects.create(run=run, name=stage)
+                logger.info("Invoice run %s completed stage %s", run_id, stage)
         _persist(run, state)
     except Exception as exc:
         logger.exception("invoice run %s failed", run_id)
@@ -75,4 +81,5 @@ def run_job(run_id):
         run.error_message = f"{type(exc).__name__}: {exc}"[:2000]
         run.finished_at = timezone.now()
         run.save(update_fields=["status", "stage", "error_message", "finished_at"])
+    logger.info("Invoice run %s finished with status %s", run_id, run.status)
     return run

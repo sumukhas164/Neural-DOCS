@@ -1,6 +1,9 @@
+from unittest.mock import patch
+
 import pytest
 from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
+from django.test import override_settings
 from rest_framework.test import APIClient
 
 from documents.models import Document
@@ -84,7 +87,7 @@ def test_numeric_rate_header_catches_real_bill_amount_confusion():
 
 
 @pytest.mark.django_db
-def test_run_and_human_correction(settings):
+def test_run_and_human_correction(settings, django_capture_on_commit_callbacks):
     user = get_user_model().objects.create_user("reviewer", password="pw")
     doc = Document.objects.create(uploaded_by=user, original_filename="bill.pdf", size_bytes=10,
                                   sha256="0" * 64, page_count=1,
@@ -109,6 +112,11 @@ def test_run_and_human_correction(settings):
     assert structured == [{"item_name": "Blood Test", "billing_group": "Laboratory Charges",
                            "qty": "2.000", "rate": "50.00", "amount": "90.00"}]
     assert client.post(f"/api/ocr/jobs/{ocr.pk}/extract/").status_code == 503
+    with override_settings(LOCAL_DEMO_MODE=True), patch("config.local_jobs.launch") as launch:
+        with django_capture_on_commit_callbacks(execute=True):
+            queued = client.post(f"/api/ocr/jobs/{ocr.pk}/extract/")
+        assert queued.status_code == 202
+        launch.assert_called_once_with("invoice", queued.data["id"])
     assert client.get(f"/api/preprocessing/pages/{page.pk}/processed.png").status_code == 200
     assert client.get(f"/api/invoices/runs/{run.pk}/pages/1/image/").status_code == 200
     response = client.patch(f"/api/invoices/runs/{run.pk}/items/r-1-1/", {"net_amount": "89.00", "note": "Checked scan"}, format="json")
