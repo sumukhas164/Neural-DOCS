@@ -16,12 +16,15 @@ async function api(path, options = {}) {
     throw new Error('Cannot reach the app server. Check that Django is running on 127.0.0.1:8000, then refresh.')
   }
   if (!response.ok) {
-    if (response.status === 401 || response.status === 403) {
-      throw new Error('Sign in to Django to view or upload invoices.')
-    }
     let body = {}
     try { body = await response.json() } catch { /* non-JSON error */ }
-    throw new Error(body.detail || `Request failed (${response.status}). Check the Django terminal for details.`)
+    const authRequired = response.status === 401 || (response.status === 403 &&
+      typeof body.detail === 'string' && /authentication credentials were not provided|not authenticated/i.test(body.detail))
+    const error = new Error(authRequired
+      ? 'Sign in with a regular account to view and process your invoices. No superuser is needed.'
+      : body.detail || `Request failed (${response.status}). Check the Django terminal for details.`)
+    error.authRequired = authRequired
+    throw error
   }
   return response.json()
 }
@@ -118,18 +121,26 @@ export default function App() {
   const [runs, setRuns] = useState([])
   const [selected, setSelected] = useState(null)
   const [error, setError] = useState('')
+  const [authRequired, setAuthRequired] = useState(false)
   const [busy, setBusy] = useState(false)
   const load = useCallback(async () => {
+    if (authRequired) return
     try {
-      const [docs, prep, ocrJobs, invoiceRuns] = await Promise.all([
-        api('/api/documents/'), api('/api/preprocessing/jobs/'), api('/api/ocr/jobs/'), api('/api/invoices/runs/'),
+      const docs = await api('/api/documents/')
+      const [prep, ocrJobs, invoiceRuns] = await Promise.all([
+        api('/api/preprocessing/jobs/'), api('/api/ocr/jobs/'), api('/api/invoices/runs/'),
       ])
       setDocuments(docs.results || docs); setPreprocess(prep.results || prep); setOcr(ocrJobs.results || ocrJobs); setRuns(invoiceRuns.results || invoiceRuns)
       setSelected(current => current ? (invoiceRuns.results || invoiceRuns).find(run => run.id === current.id) || current : null)
       setError('')
-    } catch (err) { setError(err.message) }
-  }, [])
-  useEffect(() => { load(); const timer = setInterval(load, 12000); return () => clearInterval(timer) }, [load])
+    } catch (err) { setError(err.message); if (err.authRequired) setAuthRequired(true) }
+  }, [authRequired])
+  useEffect(() => {
+    if (authRequired) return
+    load()
+    const timer = setInterval(load, 12000)
+    return () => clearInterval(timer)
+  }, [load, authRequired])
   const upload = async event => {
     event.preventDefault(); const file = event.currentTarget.elements.file.files[0]; if (!file) return
     const form = new FormData(); form.append('file', file)
@@ -140,9 +151,9 @@ export default function App() {
     setBusy(true)
     try { await api(path, { method: 'POST', body: '{}' }); await load() } catch (err) { setError(err.message) } finally { setBusy(false) }
   }
-  return <div className="shell"><header><div className="brand"><span className="mark">N</span><div><strong>Neural DOCS</strong><small>Medical invoice workspace</small></div></div><nav><a href="/api-auth/login/?next=/">Sign in</a><button className="secondary" onClick={load}>Refresh</button></nav></header>
-    <main><div className="intro"><div><p className="eyebrow">Invoice operations</p><h1>Review every charge with its source.</h1><p>Upload a medical invoice, run Nanonets OCR2, and resolve findings before accepting the result.</p></div><form onSubmit={upload} className="upload"><label htmlFor="file">New medical invoice PDF</label><input id="file" name="file" type="file" accept="application/pdf" required /><button disabled={busy}>Upload invoice</button></form></div>
-      {error && <p className="alert" role="alert">{error} <a href="/api-auth/login/?next=/">Sign in</a></p>}
+  return <div className="shell"><header><div className="brand"><span className="mark">N</span><div><strong>Neural DOCS</strong><small>Medical invoice workspace</small></div></div><nav><a href="/api-auth/login/?next=/">Sign in</a><button className="secondary" onClick={() => authRequired ? setAuthRequired(false) : load()}>Refresh</button></nav></header>
+    <main><div className="intro"><div><p className="eyebrow">Invoice operations</p><h1>Review every charge with its source.</h1><p>Upload a medical invoice, run Nanonets OCR2, and resolve findings before accepting the result.</p></div><form onSubmit={upload} className="upload"><label htmlFor="file">New medical invoice PDF</label><input id="file" name="file" type="file" accept="application/pdf" required /><button disabled={busy || authRequired}>Upload invoice</button></form></div>
+      {error && <p className="alert" role="alert">{error} {authRequired && <a href="/api-auth/login/?next=/">Sign in</a>}</p>}
       <div className="layout"><section className="documents"><div className="section-title"><h2>Documents</h2><span>{documents.length}</span></div>{documents.length ? documents.map(doc => { const prep = preprocess.find(job => job.document === doc.id); const ocrJob = ocr.find(job => job.preprocessing_job === prep?.id); const run = runs.find(item => item.ocr_job === ocrJob?.id); return <article className="doc" key={doc.id}><div className="doc-top"><div><strong>{doc.original_filename}</strong><small>{doc.page_count} page{doc.page_count === 1 ? '' : 's'} · #{doc.id}</small></div><Status value={run?.status || ocrJob?.status || prep?.status} /></div><div className="steps"><span>1 Preprocess <Status value={prep?.status} /></span><span>2 Nanonets OCR <Status value={ocrJob?.status} /></span><span>3 Review <Status value={run?.status} /></span></div><div className="actions">{prep?.status === 'completed' && !ocrJob && <button disabled={busy} onClick={() => start(`/api/preprocessing/jobs/${prep.id}/ocr/`)}>Start OCR</button>}{ocrJob?.status === 'completed' && !run && <button disabled={busy} onClick={() => start(`/api/ocr/jobs/${ocrJob.id}/extract/`)}>Extract invoice</button>}{run && <button onClick={() => setSelected(run)}>Open review</button>}</div></article> }) : <p className="empty">No invoices yet. Upload a PDF to begin.</p>}</section><section className="detail">{selected ? <Review run={selected} refresh={load} /> : <div className="welcome"><div className="welcome-icon">⌁</div><h2>Review workspace</h2><p>Choose an extracted invoice to inspect its billing groups, source pages, checks, and reviewer history.</p></div>}</section></div>
     </main><footer>Neural DOCS · Medical invoices only · Human approval required</footer></div>
 }
