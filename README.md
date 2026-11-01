@@ -2,13 +2,16 @@
 
 Medical invoice processing system: upload a PDF, preprocess its pages, run
 Nanonets OCR2-3B, reconstruct billing groups and rows, validate amounts,
-and send the result to human review.
+and send low-confidence results to human review.
 
 **Status:** The preprocessing, OCR integration, conservative HTML/Markdown
 table extraction, decimal validation, targeted Nanonets judge calls, LangGraph
 workflow, review API, and React UI are implemented. A real invoice OCR trace,
 accuracy evaluation, Redis worker, and production storage/auth hardening remain
-pending. No run is automatically approved. Design notes live in
+pending. A run is auto-approved only when its rule-based confidence score
+reaches `INVOICE_CONFIDENCE_THRESHOLD` (default 80) and it has item rows and no
+validation errors; every other run goes to human review. The score is not yet
+calibrated on labelled invoices. Design notes live in
 [`ai-rules/`](ai-rules/README.md).
 
 ## Nanonets OCR
@@ -52,14 +55,38 @@ arithmetic and routed to review; the judge cannot overwrite them.
 If a dense page reaches the model's context limit, OCR retries that page at
 smaller image sizes while keeping the complete page in view. The stored raw
 artifact includes the truncated attempts and the selected retry response.
-Every extracted value still requires human review.
+Pages read from a downscaled retry lower the run's confidence score. If every
+retry is still truncated, the longest output is kept and the page is marked
+truncated instead of failing the job.
+
+## Line-item completeness
+
+After rebuilding tables, a completeness check looks for evidence of missing
+rows: pages without OCR, truncated output or unclosed tables, gaps in S.No
+sequences, rows with blank or unreadable amounts, merged cells, amounts
+outside tables, a missing grand total, and rows repeated across a page
+boundary. Problem pages (up to `INVOICE_RETRY_MAX_PAGES`, using at most
+`INVOICE_RETRY_MAX_CALLS` gateway calls) are re-read as full-resolution
+table crops. Rows that only the crop read become candidate rows for the
+reviewer; disagreements are flagged, never auto-resolved. Any unresolved
+completeness warning sends the invoice to human review.
+
+Measure extraction against manually verified invoices with
+`python manage.py evaluate_extraction <ground-truth json files or folder>`
+(recall, precision, field accuracy, duplicate and missing rates). No verified
+set exists yet, so no accuracy improvement is claimed.
 
 ## Extraction and review
 
 `POST /api/ocr/jobs/<id>/extract/` creates an
 invoice run. Poll `GET /api/invoices/runs/<id>/` for groups, items, validation
-findings, and judge verdicts. The authenticated document owner can correct a
+findings, judge verdicts, `confidence_score` (0-100), and the score's reasons in
+`confidence`. A run finishes as `auto_approved` or `needs_review`; a reviewer can
+still correct, approve, or send back an auto-approved run. The authenticated document owner can correct a
 row with `PATCH /api/invoices/runs/<id>/items/<stable_id>/` (a `note` is required)
+accept or dismiss a candidate row with
+`POST /api/invoices/runs/<id>/candidates/<candidate_id>/`, mark a warning
+checked with `POST /api/invoices/runs/<id>/findings/<finding_id>/resolve/`,
 and make a recorded decision with `POST /api/invoices/runs/<id>/decision/`.
 Processed source page images are served through an authenticated endpoint.
 

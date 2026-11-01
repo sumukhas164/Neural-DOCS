@@ -6,9 +6,9 @@ What Layer 1 does and why. For where the code lives see
 ## Pipeline at a glance
 
 ```
-PDF --render--> page image --quality check + noise estimate--> denoise --> deskew --> quality check --> output
-     (300 dpi)   (RGB)        (flags, sigma)                  (DRUNet)    (Otsu +     (after)          PNG + metadata
-                                                                           min-area rect)
+PDF --render--> page image --quality check + noise estimate--> denoise --> deskew --> [CLAHE] --> quality check --> output
+     (300 dpi)   (RGB)        (flags, sigma)                  (DRUNet)    (Otsu +     (low_contrast  (after)          PNG + metadata
+                                                                           min-area rect) pages only)
 ```
 
 Order of the two paper stages: **denoise, then deskew** (paper Section 5).
@@ -144,6 +144,24 @@ protocol of Section 7.2: resize to 512x512, add Gaussian noise at 0.05 / 0.10
 / 0.20, restore with each algorithm using the known sigma, compute the six
 metrics, average per algorithm and noise level. Metrics come from DeepInv
 (`MSE`, `PSNR`, `SSIM`, `SSIM(multiscale=True)`, `LPIPS`, `GMSD`).
+
+### 8a. Contrast enhancement [eng]
+
+Pages flagged `low_contrast` (and not blank) get CLAHE on their luminance
+after deskewing (`pipeline/contrast.py`; clip limit 2.0, 8x8 tiles). Other
+pages are untouched. No binarisation or adaptive thresholding is applied to
+the image sent to OCR: a vision model reads grayscale well, and a hard
+threshold can erase faint decimal points and minus signs. A synthetic test
+checks a 3-pixel dot survives. The effect on real OCR accuracy is unmeasured.
+
+### 8b. Table regions for targeted OCR [eng]
+
+`pipeline/tables.py` detects ruled tables with an adaptive threshold and
+morphological horizontal/vertical line masks, keeping boxes at least 30% of
+the page wide with two or more horizontal rules. The threshold is used for
+detection only; crops are cut from the processed page. Borderless tables
+are not detected. `bands()` splits tall regions into overlapping crops. The
+invoice workflow uses these on demand; Layer 1 does not store regions.
 
 ### 8. Persistence, jobs and API [arch]
 

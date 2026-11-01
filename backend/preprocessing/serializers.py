@@ -39,6 +39,7 @@ class PreprocessedPageSerializer(serializers.ModelSerializer):
             "quality_after",
             "quality_flags",
             "timings_ms",
+            "contrast_enhanced",
         ]
 
 

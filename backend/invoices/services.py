@@ -6,7 +6,9 @@ from django.utils import timezone
 
 from ocr.models import OcrJob
 
-from .models import BillingGroup, InvoiceRun, JudgeFinding, LineItem, StageEvent, ValidationFinding
+from .confidence import needs_review
+from .models import (BillingGroup, InvoiceRun, JudgeFinding, LineItem, OcrRetryAttempt, StageEvent,
+                     ValidationFinding)
 from .validation import money
 from .workflow import build_graph
 
@@ -28,13 +30,22 @@ def submit_run(ocr_job):
 
 def _persist(run, state):
     invoice = state["invoice"]
+    confidence = {**state["confidence"], "threshold": settings.INVOICE_CONFIDENCE_THRESHOLD}
     with transaction.atomic():
         run.extraction = invoice
         run.original_extraction = invoice
-        run.stage = "human_review"
-        run.status = InvoiceRun.Status.NEEDS_REVIEW
+        run.confidence = confidence
+        run.confidence_score = confidence["score"]
+        if needs_review(confidence, settings.INVOICE_CONFIDENCE_THRESHOLD):
+            run.stage = "human_review"
+            run.status = InvoiceRun.Status.NEEDS_REVIEW
+        else:
+            run.stage = "auto_approved"
+            run.status = InvoiceRun.Status.AUTO_APPROVED
+        run.validation_summary = state.get("validation_summary", {})
         run.finished_at = timezone.now()
-        run.save(update_fields=["extraction", "original_extraction", "stage", "status", "finished_at"])
+        run.save(update_fields=["extraction", "original_extraction", "confidence", "confidence_score",
+                                "validation_summary", "stage", "status", "finished_at"])
         groups = {}
         for group in invoice["groups"]:
             groups[group["id"]] = BillingGroup.objects.create(
@@ -43,17 +54,23 @@ def _persist(run, state):
         for row in invoice["items"]:
             LineItem.objects.create(
                 run=run, stable_id=row["id"], group=groups.get(row["group_id"]),
-                page_number=row["page_number"], row_order=row["row_order"], kind=row["kind"],
+                page_number=row["page_number"], table_number=row.get("table_number"),
+                row_order=row["row_order"], serial=row.get("serial") or "", kind=row["kind"],
                 name=row["name"], quantity=money(row["quantity"]), unit_rate=money(row["unit_rate"]),
                 gross_amount=money(row["gross_amount"]), discount=money(row["discount"]),
                 net_amount=money(row["net_amount"]), relationship=row["relationship"],
-                source_text=row["source_text"])
-        for finding in state["findings"]:
-            ValidationFinding.objects.create(run=run, code=finding["code"],
-                                             severity=finding["severity"], target_id=finding["target_id"],
-                                             message=finding["message"], evidence=finding.get("evidence") or "")
+                source_text=row["source_text"], extraction_method=row.get("extraction_method", "page_ocr"),
+                review_status=row.get("review_status", LineItem.ReviewStatus.AUTO_EXTRACTED),
+                flags=row.get("flags", []), tax_amounts=row.get("tax_amounts", {}))
+        for finding in state["findings"] + state.get("completeness_findings", []):
+            ValidationFinding.objects.create(run=run, category=finding.get("category", "financial"),
+                                             code=finding["code"], severity=finding["severity"],
+                                             target_id=finding["target_id"], message=finding["message"],
+                                             evidence=finding.get("evidence") or "")
         for verdict in state["judge_findings"]:
             JudgeFinding.objects.create(run=run, **verdict)
+        for attempt in state.get("retry_attempts", []):
+            OcrRetryAttempt.objects.create(run=run, **attempt)
 
 
 def run_job(run_id):

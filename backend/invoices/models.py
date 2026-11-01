@@ -9,6 +9,7 @@ class InvoiceRun(models.Model):
         PENDING = "pending", "Pending"
         RUNNING = "running", "Running"
         NEEDS_REVIEW = "needs_review", "Needs review"
+        AUTO_APPROVED = "auto_approved", "Auto-approved"
         APPROVED = "approved", "Approved"
         FAILED = "failed", "Failed"
 
@@ -19,6 +20,9 @@ class InvoiceRun(models.Model):
     original_extraction = models.JSONField(default=dict)
     extraction = models.JSONField(default=dict)
     checkpoint_state = models.JSONField(default=dict)
+    confidence_score = models.PositiveSmallIntegerField(null=True, blank=True)
+    confidence = models.JSONField(default=dict)
+    validation_summary = models.JSONField(default=dict)
     error_message = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     started_at = models.DateTimeField(null=True, blank=True)
@@ -41,12 +45,24 @@ class LineItem(models.Model):
         ITEM = "item", "Item"
         SUBTOTAL = "subtotal", "Subtotal"
         TOTAL = "total", "Total"
+        TAX = "tax", "Tax"
+        DISCOUNT = "discount", "Discount"
+        PAYMENT = "payment", "Payment"
+        ADJUSTMENT = "adjustment", "Adjustment"
+
+    class ReviewStatus(models.TextChoices):
+        AUTO_EXTRACTED = "auto_extracted", "Automatically extracted"
+        NEEDS_REVIEW = "needs_review", "Needs review"
+        HUMAN_CORRECTED = "human_corrected", "Human corrected"
+        HUMAN_ADDED = "human_added", "Added by reviewer"
 
     run = models.ForeignKey(InvoiceRun, on_delete=models.CASCADE, related_name="items")
     stable_id = models.CharField(max_length=64)
     group = models.ForeignKey(BillingGroup, null=True, blank=True, on_delete=models.SET_NULL, related_name="items")
     page_number = models.PositiveIntegerField()
+    table_number = models.PositiveIntegerField(null=True, blank=True)
     row_order = models.PositiveIntegerField()
+    serial = models.CharField(max_length=32, blank=True)
     kind = models.CharField(max_length=16, choices=Kind.choices)
     name = models.CharField(max_length=500)
     quantity = models.DecimalField(max_digits=16, decimal_places=3, null=True, blank=True)
@@ -56,6 +72,11 @@ class LineItem(models.Model):
     net_amount = models.DecimalField(max_digits=16, decimal_places=2, null=True, blank=True)
     relationship = models.CharField(max_length=32)
     source_text = models.TextField()
+    extraction_method = models.CharField(max_length=64, default="page_ocr")
+    review_status = models.CharField(max_length=24, choices=ReviewStatus.choices,
+                                     default=ReviewStatus.AUTO_EXTRACTED)
+    flags = models.JSONField(default=list)
+    tax_amounts = models.JSONField(default=dict)
 
     class Meta:
         ordering = ["page_number", "row_order"]
@@ -63,12 +84,19 @@ class LineItem(models.Model):
 
 
 class ValidationFinding(models.Model):
+    class Category(models.TextChoices):
+        FINANCIAL = "financial", "Financial"
+        COMPLETENESS = "completeness", "Completeness"
+
     run = models.ForeignKey(InvoiceRun, on_delete=models.CASCADE, related_name="findings")
+    category = models.CharField(max_length=16, choices=Category.choices, default=Category.FINANCIAL)
     code = models.CharField(max_length=64)
     severity = models.CharField(max_length=16)
     target_id = models.CharField(max_length=64)
     message = models.TextField()
     evidence = models.TextField(blank=True)
+    resolved = models.BooleanField(default=False)
+    resolution_note = models.TextField(blank=True)
 
 
 class JudgeFinding(models.Model):
@@ -96,3 +124,21 @@ class StageEvent(models.Model):
     run = models.ForeignKey(InvoiceRun, on_delete=models.CASCADE, related_name="stage_events")
     name = models.CharField(max_length=64)
     created_at = models.DateTimeField(auto_now_add=True)
+
+
+class OcrRetryAttempt(models.Model):
+    """One targeted OCR call on a crop of a problem page, kept for audit."""
+
+    run = models.ForeignKey(InvoiceRun, on_delete=models.CASCADE, related_name="retry_attempts")
+    page_number = models.PositiveIntegerField()
+    region = models.JSONField(default=list)  # [x, y, width, height] in processed-page pixels
+    coverage = models.CharField(max_length=16)  # "tables" or "page"
+    reasons = models.JSONField(default=list)
+    status = models.CharField(max_length=16)  # completed | truncated | failed
+    text = models.TextField(blank=True)
+    raw_response = models.JSONField(default=dict)
+    error = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["page_number", "id"]

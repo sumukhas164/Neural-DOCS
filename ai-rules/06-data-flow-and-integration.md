@@ -33,7 +33,10 @@ text. The full model response is stored per page. The API exposes progress at
 
 The invoice workflow reconstructs billing groups and item rows from OCR text,
 checks arithmetic with Decimal, asks targeted questions of the same model for
-uncertain rows, and routes every run to human review. `backend/invoices/`
+uncertain rows, checks line-item completeness (re-reading problem pages'
+tables with targeted OCR), scores confidence, and routes runs below
+`INVOICE_CONFIDENCE_THRESHOLD` (or with validation errors or no items) to human
+review; the rest finish as `auto_approved`. `backend/invoices/`
 stores stage events and reviewer edits. Its judge is not independent of the
 OCR model. See `09-invoice-workflow.md` for the current limits.
 
@@ -79,7 +82,8 @@ The framework-free pipeline also accepts a single image array through
 | `transform` | 2x3 matrix | Maps original-image pixel `(x, y, 1)` to processed-image pixel |
 | `quality_before`, `quality_after` | object | `width, height, dpi, brightness, contrast, sharpness, ink_ratio, chroma, noise_sigma, flags` |
 | `quality_flags` | list of str | Copy of `quality_before.flags` |
-| `timings_ms` | object | `quality_before, denoise, deskew, quality_after` |
+| `timings_ms` | object | `quality_before, denoise, deskew, quality_after`, plus `contrast` when it ran |
+| `contrast_enhanced` | bool | CLAHE was applied (page flagged `low_contrast`) |
 
 Quality flags: `low_resolution`, `blurry`, `low_contrast`, `too_dark`,
 `overexposed`, `blank_page`, `high_noise`.
@@ -122,6 +126,21 @@ Options a client may set on a re-run: `denoiser`, `sigma_mode`,
 
 Errors: `400` validation (message under the field name), `401/403`
 unauthenticated, `404` not found or not owned.
+
+Invoice review endpoints (all additive; earlier fields are unchanged):
+
+| Method and path | Purpose |
+| --- | --- |
+| `GET /api/invoices/runs/<id>/` | Run with items (now with `table_number`, `serial`, `extraction_method`, `review_status`, `flags`, `tax_amounts`), findings (`id`, `category`, `resolved`, `resolution_note`), `validation_summary`, `retry_attempts`, `ocr_job_pages`, and `extraction.candidate_rows`. `structured_items` rows gain `page_number`, `row_order`, `source_text`, `extraction_method`, `review_status` |
+| `PATCH /api/invoices/runs/<id>/items/<stable_id>/` | Correct a row (`note` required) |
+| `POST /api/invoices/runs/<id>/candidates/<candidate_id>/` | `{"action": "accept"|"dismiss", "note", "group_id"?}` for a row only targeted OCR found |
+| `POST /api/invoices/runs/<id>/findings/<finding_id>/resolve/` | Mark a finding checked (`note` required) |
+| `POST /api/invoices/runs/<id>/decision/` | Approve (no unresolved error findings, item rows present) or keep for review |
+| `GET /api/invoices/runs/<id>/pages/<n>/image/` | Processed page PNG; `?variant=original` for the original render |
+
+New invoice tables: `invoices_ocrretryattempt` (one row per targeted OCR
+call, with the full raw response). `invoices_lineitem` and
+`invoices_validationfinding` gained the columns listed above.
 
 ## Layer 1 hand-off and remaining integration work
 

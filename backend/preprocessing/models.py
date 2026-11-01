@@ -76,6 +76,7 @@ class PreprocessedPage(models.Model):
     # Copy of quality_before["flags"], denormalised for filtering.
     quality_flags = models.JSONField(default=list)
     timings_ms = models.JSONField(default=dict)
+    contrast_enhanced = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

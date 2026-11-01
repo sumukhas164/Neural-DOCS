@@ -45,18 +45,18 @@ function downloadStructuredItems(run) {
   setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
-function PageImage({ runId, page }) {
+function PageImage({ runId, page, variant }) {
   const [url, setUrl] = useState('')
   useEffect(() => {
     let active = true
-    fetch(`/api/invoices/runs/${runId}/pages/${page}/image/`, { credentials: 'same-origin' })
+    fetch(`/api/invoices/runs/${runId}/pages/${page}/image/${variant === 'original' ? '?variant=original' : ''}`, { credentials: 'same-origin' })
       .then(response => { if (!response.ok) throw new Error('Image unavailable'); return response.blob() })
       .then(blob => { if (active) setUrl(URL.createObjectURL(blob)) })
       .catch(() => setUrl(''))
     return () => { active = false }
-  }, [runId, page])
+  }, [runId, page, variant])
   useEffect(() => () => { if (url) URL.revokeObjectURL(url) }, [url])
-  return url ? <img className="source-image" src={url} alt={`Processed invoice page ${page}`} /> : <p className="muted">Page preview unavailable.</p>
+  return url ? <img className="source-image" src={url} alt={`${variant === 'original' ? 'Original' : 'Processed'} invoice page ${page}`} /> : <p className="muted">Page preview unavailable.</p>
 }
 
 function ItemEditor({ item, groups, save, cancel }) {
@@ -71,46 +71,108 @@ function ItemEditor({ item, groups, save, cancel }) {
   </form>
 }
 
+function NoteAction({ label, placeholder, onSubmit, children }) {
+  const [open, setOpen] = useState(false)
+  const [note, setNote] = useState('')
+  if (!open) return <button className="text-button" onClick={() => setOpen(true)}>{label}</button>
+  return <form className="note-action" onSubmit={async event => { event.preventDefault(); if (await onSubmit(note)) { setOpen(false); setNote('') } }}>
+    {children}
+    <input required value={note} onChange={event => setNote(event.target.value)} placeholder={placeholder} />
+    <div className="actions"><button type="submit">{label}</button><button type="button" className="secondary" onClick={() => setOpen(false)}>Cancel</button></div>
+  </form>
+}
+
+const REVIEW_STATUS = { auto_extracted: 'auto extracted', needs_review: 'needs review', human_corrected: 'human corrected', human_added: 'added by reviewer' }
+
+function pageOf(target, rows) {
+  const match = /^page-(\d+)$/.exec(target || '')
+  if (match) return Number(match[1])
+  return rows.find(row => row.stable_id === target)?.page_number || null
+}
+
+function RowRef({ item }) {
+  return <small className="row-ref">p{item.page_number}{item.table_number ? ` · table ${item.table_number}` : ''} · row {item.row_order}{item.serial ? ` · S.No ${item.serial}` : ''} · {item.extraction_method}</small>
+}
+
 function Review({ run, refresh }) {
   const [page, setPage] = useState(1)
+  const [variant, setVariant] = useState('processed')
+  const [focus, setFocus] = useState(null)
   const [editing, setEditing] = useState('')
+  const [candidateGroup, setCandidateGroup] = useState({})
   const [note, setNote] = useState('')
   const [error, setError] = useState('')
-  const save = async (id, body) => {
+  const call = async (path, method, body) => {
     try {
-      await api(`/api/invoices/runs/${run.id}/items/${id}/`, { method: 'PATCH', body: JSON.stringify(body) })
-      setEditing(''); setError(''); refresh()
-    } catch (err) { setError(err.message) }
+      await api(path, { method, body: JSON.stringify(body) })
+      setError(''); refresh(); return true
+    } catch (err) { setError(err.message); return false }
   }
-  const decide = async decision => {
-    try {
-      await api(`/api/invoices/runs/${run.id}/decision/`, { method: 'POST', body: JSON.stringify({ decision, note }) })
-      setNote(''); setError(''); refresh()
-    } catch (err) { setError(err.message) }
-  }
+  const save = async (id, body) => { if (await call(`/api/invoices/runs/${run.id}/items/${id}/`, 'PATCH', body)) setEditing('') }
+  const decide = async decision => { if (await call(`/api/invoices/runs/${run.id}/decision/`, 'POST', { decision, note })) setNote('') }
+  const resolve = (finding, text) => call(`/api/invoices/runs/${run.id}/findings/${finding.id}/resolve/`, 'POST', { note: text })
+  const candidate = (row, action, text) => call(`/api/invoices/runs/${run.id}/candidates/${row.id}/`, 'POST', { action, note: text, group_id: candidateGroup[row.id] || null })
+  const show = (pageNumber, item) => { if (pageNumber) setPage(pageNumber); setFocus(item || null) }
+  const awaitingDecision = run.status === 'needs_review' || run.status === 'auto_approved'
   const groups = run.groups || []
   const items = run.items || []
+  const findings = run.findings || []
   const lineItems = items.filter(item => item.kind === 'item')
   const groupNames = Object.fromEntries(groups.map(group => [group.stable_id, group.name]))
+  const openFindings = findings.filter(finding => !finding.resolved && finding.severity !== 'info')
+  const completeness = openFindings.filter(finding => finding.category === 'completeness')
+  const rowWarnings = Object.groupBy ? Object.groupBy(openFindings, finding => finding.target_id) : openFindings.reduce((map, finding) => ({ ...map, [finding.target_id]: [...(map[finding.target_id] || []), finding] }), {})
+  const candidates = (run.extraction?.candidate_rows || []).filter(row => row.status === 'pending')
+  const summary = run.validation_summary || {}
+  const pageCount = run.ocr_job_pages || Math.max(1, ...items.map(item => item.page_number))
+  const findingRow = finding => <div key={finding.id} className={`finding ${finding.resolved ? 'resolved' : ''}`}>
+    <Status value={finding.resolved ? 'resolved' : finding.severity} /><strong>{finding.code.replaceAll('_', ' ')}</strong><small className="category">{finding.category}</small>
+    <p>{finding.message}</p>{finding.evidence && <pre className="evidence">{finding.evidence}</pre>}
+    <small>{finding.target_id}{finding.resolved && ` · resolved: ${finding.resolution_note}`}</small>
+    <div className="actions">{pageOf(finding.target_id, items) && <button className="text-button" onClick={() => show(pageOf(finding.target_id, items), items.find(item => item.stable_id === finding.target_id))}>Show on page {pageOf(finding.target_id, items)}</button>}
+      {!finding.resolved && <NoteAction label="Mark checked" placeholder="What did you compare against the invoice?" onSubmit={text => resolve(finding, text)} />}</div>
+  </div>
+  const itemRow = item => <div key={item.stable_id} className={`item ${focus?.stable_id === item.stable_id ? 'focused' : ''}`}>
+    <div className="item-title"><strong>{item.name || <em>no description</em>}</strong><span>{item.net_amount || item.gross_amount || '—'}</span></div>
+    <small>{item.kind} · {item.relationship} · <span className={`review-status ${item.review_status}`}>{REVIEW_STATUS[item.review_status] || item.review_status}</span></small><RowRef item={item} />
+    {(rowWarnings[item.stable_id] || []).map(finding => <p className="row-warning" key={finding.id}>⚠ {finding.message}</p>)}
+    <div className="actions"><button className="text-button" onClick={() => show(item.page_number, item)}>Compare with page</button>
+      {editing === item.stable_id ? null : <button className="text-button" onClick={() => { show(item.page_number, item); setEditing(item.stable_id) }}>Correct row or group</button>}</div>
+    {editing === item.stable_id && <ItemEditor item={item} groups={groups} save={body => save(item.stable_id, body)} cancel={() => setEditing('')} />}
+  </div>
   return <section className="review">
     <div className="review-head"><div><p className="eyebrow">Extraction review</p><h2>Invoice run #{run.id}</h2><p className="muted">Schema {run.schema_version} · {run.stage}</p></div><Status value={run.status} /></div>
     {error && <p className="alert" role="alert">{error}</p>}
     {run.error_message && <p className="alert">{run.error_message}</p>}
-    <div className="summary">{[['Provider', run.extraction?.provider_name], ['Invoice', run.extraction?.invoice_number], ['Date', run.extraction?.invoice_date], ['Patient', run.extraction?.patient_name], ['Grand total', run.extraction?.grand_total]].map(([label, value]) => <div key={label}><small>{label}</small><strong>{value || 'Not found'}</strong></div>)}</div>
+    <div className="summary">{[['Provider', run.extraction?.provider_name], ['Invoice', run.extraction?.invoice_number], ['Date', run.extraction?.invoice_date], ['Patient', run.extraction?.patient_name], ['Grand total', run.extraction?.grand_total], ['Confidence', run.confidence_score == null ? null : `${run.confidence_score} / 100 (threshold ${run.confidence?.threshold ?? '—'})`]].map(([label, value]) => <div key={label}><small>{label}</small><strong>{value || 'Not found'}</strong></div>)}</div>
+    {run.confidence_score != null && (run.confidence?.reasons?.length > 0 || run.confidence?.blockers?.length > 0) && <ul className="confidence-reasons">{[...(run.confidence.blockers || []), ...(run.confidence.reasons || [])].map(reason => <li key={reason}>{reason}</li>)}</ul>}
+    {completeness.length > 0 && <section className="completeness" aria-label="Completeness warnings"><h3>Possible missing or incomplete rows ({completeness.length})</h3><p className="muted">Each warning must be checked against the source page. The invoice will not be approved automatically while any remain.</p>{completeness.map(findingRow)}</section>}
+    {candidates.length > 0 && <section className="candidates" aria-label="Candidate rows"><h3>Rows found only by targeted table OCR ({candidates.length})</h3><p className="muted">These were read from a full-resolution crop but not from the page OCR. Accept a row only after finding it on the source page.</p>
+      {candidates.map(row => <div className="item candidate" key={row.id}><div className="item-title"><strong>{row.name || <em>no description</em>}</strong><span>{row.net_amount || row.gross_amount || '—'}</span></div><small>page {row.page_number} · qty {row.quantity ?? '—'} · rate {row.unit_rate ?? '—'} · {row.extraction_method}</small><pre className="evidence">{row.source_text}</pre>
+        <div className="actions"><button className="text-button" onClick={() => show(row.page_number)}>Show page {row.page_number}</button>
+          <NoteAction label="Accept as item" placeholder="Where is this row on the invoice?" onSubmit={text => candidate(row, 'accept', text)}><select aria-label="Billing group" value={candidateGroup[row.id] || ''} onChange={event => setCandidateGroup(current => ({ ...current, [row.id]: event.target.value }))}><option value="">Unassigned</option>{groups.map(group => <option key={group.stable_id} value={group.stable_id}>{group.name}</option>)}</select></NoteAction>
+          <NoteAction label="Dismiss" placeholder="Why is this not a separate charge?" onSubmit={text => candidate(row, 'dismiss', text)} /></div></div>)}
+    </section>}
     <section className="structured-output" aria-label="Structured invoice items">
-      <div className="structured-head"><div><h3>Structured invoice items</h3><p className="muted">Amount uses the net amount when present; otherwise it uses the gross amount.</p></div><button className="secondary" disabled={!lineItems.length} onClick={() => downloadStructuredItems(run)}>Download JSON</button></div>
-      {lineItems.length ? <div className="table-scroll"><table className="items-table"><thead><tr><th>Item name</th><th>Billing group</th><th>Qty</th><th>Rate</th><th>Amount</th></tr></thead><tbody>{lineItems.map(item => <tr key={item.stable_id}><td>{item.name}</td><td>{groupNames[item.group_id] || 'Unassigned'}</td><td>{item.quantity ?? '—'}</td><td>{item.unit_rate ?? '—'}</td><td>{item.net_amount ?? item.gross_amount ?? '—'}</td></tr>)}</tbody></table></div> : <p className="empty">No item rows extracted yet. Check the OCR result and source page.</p>}
+      <div className="structured-head"><div><h3>Structured invoice items</h3><p className="muted">Amount uses the net amount when present; otherwise it uses the gross amount. Select a row to compare it with the page.</p></div><button className="secondary" disabled={!lineItems.length} onClick={() => downloadStructuredItems(run)}>Download JSON</button></div>
+      {lineItems.length ? <div className="table-scroll"><table className="items-table"><thead><tr><th>Source</th><th>Item name</th><th>Billing group</th><th>Qty</th><th>Rate</th><th>Amount</th><th>Status</th></tr></thead><tbody>{lineItems.map(item => <tr key={item.stable_id} className={rowWarnings[item.stable_id] ? 'warn' : ''} onClick={() => show(item.page_number, item)}><td>p{item.page_number}·r{item.row_order}</td><td>{item.name || '—'}{rowWarnings[item.stable_id] && <span className="warn-mark" title={rowWarnings[item.stable_id].map(f => f.message).join('\n')}> ⚠</span>}</td><td>{groupNames[item.group_id] || 'Unassigned'}</td><td>{item.quantity ?? '—'}</td><td>{item.unit_rate ?? '—'}</td><td>{item.net_amount ?? item.gross_amount ?? '—'}</td><td><span className={`review-status ${item.review_status}`}>{REVIEW_STATUS[item.review_status] || item.review_status}</span></td></tr>)}</tbody></table></div> : <p className="empty">No item rows extracted yet. Check the OCR result and source page.</p>}
+      {Object.keys(summary).length > 0 && <p className="check-summary">{Object.entries(summary).map(([check, counts]) => <span key={check}>{check.replaceAll('_', ' ')}: {counts.passed} passed, {counts.failed} failed, {counts.unavailable} unavailable</span>)}</p>}
     </section>
     <div className="review-columns"><div>
       <h3>Source rows and corrections</h3>
-      {groups.map(group => <div className="group" key={group.stable_id}><h4>{group.name} <small>page {group.page_number}</small></h4>{items.filter(item => item.group_id === group.stable_id).map(item => <div className="item" key={item.stable_id}><div className="item-title"><strong>{item.name}</strong><span>{item.net_amount || item.gross_amount || '—'}</span></div><small>{item.kind} · page {item.page_number} · {item.relationship}</small>{editing === item.stable_id ? <ItemEditor item={item} groups={groups} save={body => save(item.stable_id, body)} cancel={() => setEditing('')} /> : <button className="text-button" onClick={() => { setPage(item.page_number); setEditing(item.stable_id) }}>Correct row or group</button>}</div>)}</div>)}
-      {items.filter(item => !item.group_id).length > 0 && <div className="group"><h4>Unassigned and totals</h4>{items.filter(item => !item.group_id).map(item => <div className="item" key={item.stable_id}><div className="item-title"><strong>{item.name}</strong><span>{item.net_amount || item.gross_amount || '—'}</span></div><small>{item.kind} · page {item.page_number}</small>{editing === item.stable_id ? <ItemEditor item={item} groups={groups} save={body => save(item.stable_id, body)} cancel={() => setEditing('')} /> : <button className="text-button" onClick={() => { setPage(item.page_number); setEditing(item.stable_id) }}>Correct row or group</button>}</div>)}</div>}
+      {groups.map(group => <div className="group" key={group.stable_id}><h4>{group.name} <small>page {group.page_number}</small></h4>{items.filter(item => item.group_id === group.stable_id).map(itemRow)}</div>)}
+      {items.filter(item => !item.group_id).length > 0 && <div className="group"><h4>Unassigned and totals</h4>{items.filter(item => !item.group_id).map(itemRow)}</div>}
       {!items.length && <p className="empty">No item rows found. Review the OCR page before making a decision.</p>}
-      <h3>Validation findings</h3>{run.findings?.length ? run.findings.map((finding, index) => <div className="finding" key={index}><Status value={finding.severity} /><strong>{finding.code.replaceAll('_', ' ')}</strong><p>{finding.message}</p><small>{finding.target_id}</small></div>) : <p className="muted">No deterministic discrepancies found.</p>}
+      <h3>Validation findings</h3>{findings.filter(finding => finding.category !== 'completeness').length ? findings.filter(finding => finding.category !== 'completeness').map(findingRow) : <p className="muted">No deterministic discrepancies found.</p>}
+      {findings.some(finding => finding.category === 'completeness' && (finding.resolved || finding.severity === 'info')) && <details><summary>Resolved and informational completeness notes</summary>{findings.filter(finding => finding.category === 'completeness' && (finding.resolved || finding.severity === 'info')).map(findingRow)}</details>}
       <h3>Judge findings</h3>{run.judge_findings?.length ? run.judge_findings.map((finding, index) => <div className="finding" key={index}><Status value={finding.verdict} /><p>{finding.reason}</p><small>{finding.target_id}</small></div>) : <p className="muted">No judge verdicts recorded.</p>}
-      <h3>Reviewer decision</h3><textarea value={note} onChange={event => setNote(event.target.value)} placeholder="Record the evidence for your decision" /><div className="actions"><button disabled={!note || run.status !== 'needs_review'} onClick={() => decide('approve')}>Approve</button><button className="secondary" disabled={!note || run.status !== 'needs_review'} onClick={() => decide('reject')}>Keep for review</button></div>
+      <h3>Targeted OCR retries</h3>{run.retry_attempts?.length ? run.retry_attempts.map((attempt, index) => <p className="audit" key={index}>Page {attempt.page_number} · {attempt.coverage} crop [{attempt.region.join(', ')}] · <Status value={attempt.status} /> · {attempt.reasons.join(', ')}{attempt.error && <small>{attempt.error}</small>}</p>) : <p className="muted">No pages needed a targeted re-read.</p>}
+      <h3>Reviewer decision</h3><textarea value={note} onChange={event => setNote(event.target.value)} placeholder="Record the evidence for your decision" /><div className="actions"><button disabled={!note || !awaitingDecision} onClick={() => decide('approve')}>Approve</button><button className="secondary" disabled={!note || !awaitingDecision} onClick={() => decide('reject')}>Keep for review</button></div>
       <h3>Audit history</h3>{run.review_events?.length ? run.review_events.map((event, index) => <p className="audit" key={index}>{event.actor} · {event.action} · {event.note} <small>{new Date(event.created_at).toLocaleString()}</small></p>) : <p className="muted">No reviewer changes yet.</p>}
-    </div><aside className="source"><div className="source-head"><h3>Source page</h3><select aria-label="Source page" value={page} onChange={event => setPage(Number(event.target.value))}>{Array.from({ length: run.ocr_job_pages || Math.max(1, ...items.map(item => item.page_number)) }, (_, index) => <option key={index + 1} value={index + 1}>Page {index + 1}</option>)}</select></div><PageImage runId={run.id} page={page} /><p className="muted">Page references come from OCR. Region boxes are unavailable.</p></aside></div>
+    </div><aside className="source"><div className="source-head"><h3>Source page</h3><select aria-label="Source page" value={page} onChange={event => { setPage(Number(event.target.value)); setFocus(null) }}>{Array.from({ length: pageCount }, (_, index) => <option key={index + 1} value={index + 1}>Page {index + 1}</option>)}</select></div>
+      <div className="variant-toggle" role="group" aria-label="Image version">{['processed', 'original'].map(name => <button key={name} className={variant === name ? '' : 'secondary'} onClick={() => setVariant(name)}>{name}</button>)}</div>
+      {focus && focus.page_number === page && <div className="focus-row"><small>Compare this extracted row with the page</small><strong>{focus.name}</strong><RowRef item={focus} /><pre className="evidence">{focus.source_text}</pre></div>}
+      <PageImage runId={run.id} page={page} variant={variant} /><p className="muted">Page references come from OCR. Region boxes are unavailable; use the row text above to locate it.</p></aside></div>
   </section>
 }
 

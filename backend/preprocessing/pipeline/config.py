@@ -90,6 +90,14 @@ class PreprocessingConfig:
     blank_ink_ratio: float = 0.0005
     grayscale_chroma_threshold: float = 0.02
 
+    # --- Contrast enhancement (not in the paper) ----------------------------
+    # Engineering default: pages flagged low_contrast get mild CLAHE on their
+    # luminance after deskewing. It never binarises, so faint decimal points
+    # and minus signs survive; other pages are left untouched.
+    contrast_enhancement: bool = True
+    clahe_clip_limit: float = 2.0
+    clahe_tile_grid: int = 8
+
     def __post_init__(self) -> None:
         self._validate()
 
@@ -127,6 +135,10 @@ class PreprocessingConfig:
             raise ConfigError("min_skew_angle must be non-negative")
         if self.crop_padding < 0:
             raise ConfigError("crop_padding must be non-negative")
+        if not 1.0 <= self.clahe_clip_limit <= 4.0:
+            raise ConfigError("clahe_clip_limit must be in [1, 4]; higher values amplify scan noise")
+        if not 2 <= self.clahe_tile_grid <= 32:
+            raise ConfigError("clahe_tile_grid must be in [2, 32]")
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

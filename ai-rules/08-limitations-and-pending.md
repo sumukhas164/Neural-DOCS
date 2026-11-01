@@ -81,6 +81,10 @@
 | Uploads are PDFs only | Architecture diagram says "Upload PDF" |
 | One user owns a document | No sharing or roles are specified |
 | Layer 1 flags, Layer 3 decides | Architecture places routing in Layer 3 |
+| Invoice runs scoring 80 or more with no errors skip human review | Owner's instruction; score formula and weights are engineering defaults |
+| Unresolved completeness warnings always force human review | Owner's instruction: uncertain row coverage must not be auto-approved |
+| CLAHE on low-contrast pages, never binarisation | Not in the paper; binarisation can erase decimal points and minus signs |
+| Targeted OCR results are compared, never merged automatically | Owner's instruction: disagreements go to a reviewer |
 
 ## Not verified
 
@@ -126,6 +130,15 @@
 - [ ] Evaluate the legibility and amount accuracy of 2600/2200-pixel retries
       on dense pages that exceed the Colab model's 12,288-token context window.
 - [ ] Calibrate final validation and reconciliation on labelled medical invoices.
+- [ ] Calibrate the invoice confidence weights and the 80 threshold against
+      labelled invoices; measure how many wrong extractions are auto-approved.
+- [ ] Build a manually verified invoice set and run `evaluate_extraction`
+      before and after these changes; no recall or precision figure exists yet.
+- [ ] Measure whether CLAHE and full-resolution table crops change OCR
+      accuracy on real low-contrast or dense bills.
+- [ ] Detect borderless tables for targeted OCR (currently full-width bands).
+- [ ] Optional medical terminology assistance and look-alike medicine checks,
+      always as flagged suggestions.
 - [ ] REST API: real authentication (tokens or sessions for the SPA), CORS,
       pagination, rate limits.
 - [x] Local React review interface; browser QA and production auth remain.

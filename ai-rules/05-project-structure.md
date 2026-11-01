@@ -7,7 +7,12 @@
 | `backend/preprocessing/` | PDF rendering, image cleanup, page storage |
 | `backend/ocr/client.py` | Authenticated gateway requests and job polling |
 | `backend/ocr/services.py`, `tasks.py`, `views.py` | OCR jobs, persistence, API |
-| `backend/invoices/` | Structured extraction, Decimal validation, LangGraph workflow, review |
+| `backend/preprocessing/pipeline/contrast.py`, `tables.py` | CLAHE for low-contrast pages; ruled-table detection and overlapping crop bands |
+| `backend/invoices/extraction.py`, `numbers.py` | Table reconstruction with row accounting and provenance; Indian number parsing |
+| `backend/invoices/completeness.py`, `retry.py` | Line-item completeness checks; targeted table-crop OCR |
+| `backend/invoices/validation.py`, `confidence.py` | Decimal checks with unavailable-operand tracking; review routing score |
+| `backend/invoices/workflow.py`, `services.py`, `views.py` | LangGraph stages, persistence, review API |
+| `backend/invoices/evaluation.py` | Recall/precision/field accuracy against verified invoices (`evaluate_extraction`) |
 | `frontend/` | React and Vite upload and review interface |
 | `colab/nanonets_gateway.py` | Authenticated asynchronous gateway in Colab |
 | `colab/build_notebook.py` | Generates the notebook and copy/paste setup files |

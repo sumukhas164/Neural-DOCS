@@ -180,6 +180,20 @@ NANONETS_MODEL = os.environ.get("NANONETS_MODEL", "nanonets/Nanonets-OCR2-3B")
 NANONETS_TIMEOUT_SECONDS = int(os.environ.get("NANONETS_TIMEOUT_SECONDS", "1800"))
 NANONETS_MAX_TOKENS = int(os.environ.get("NANONETS_MAX_TOKENS", "8192"))
 
+# Invoice runs scoring below this (0-100) go to human review.
+INVOICE_CONFIDENCE_THRESHOLD = int(os.environ.get("INVOICE_CONFIDENCE_THRESHOLD", "80"))
+if not 0 <= INVOICE_CONFIDENCE_THRESHOLD <= 100:
+    raise ImproperlyConfigured("INVOICE_CONFIDENCE_THRESHOLD must be between 0 and 100")
+# Targeted table OCR of pages the completeness check questions. Each page is
+# re-read once; these cap the extra gateway calls per invoice run.
+INVOICE_RETRY_MAX_PAGES = int(os.environ.get("INVOICE_RETRY_MAX_PAGES", "3"))
+INVOICE_RETRY_MAX_CALLS = int(os.environ.get("INVOICE_RETRY_MAX_CALLS", "12"))
+INVOICE_RETRY_BAND_HEIGHT = int(os.environ.get("INVOICE_RETRY_BAND_HEIGHT", "1400"))
+INVOICE_RETRY_BAND_OVERLAP = int(os.environ.get("INVOICE_RETRY_BAND_OVERLAP", "160"))
+if min(INVOICE_RETRY_MAX_PAGES, INVOICE_RETRY_MAX_CALLS) < 0 or         not 0 <= INVOICE_RETRY_BAND_OVERLAP < INVOICE_RETRY_BAND_HEIGHT:
+    raise ImproperlyConfigured("Invoice retry limits must be non-negative and the band overlap "
+                               "smaller than the band height")
+
 LOCAL_LOG_DIR = BASE_DIR / "logs"
 LOCAL_LOG_DIR.mkdir(exist_ok=True)
 

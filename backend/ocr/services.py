@@ -33,7 +33,12 @@ def _downscaled_png(image: bytes, max_edge: int) -> bytes | None:
 
 
 def _recognize_complete(image: bytes, *, page_number: int, model: str) -> tuple[dict, dict]:
-    """Retry a context-truncated page at lower resolution; retain every response."""
+    """Retry a context-truncated page at lower resolution; retain every response.
+
+    If every attempt is truncated, the longest output is kept with
+    finish_reason "length" instead of failing the job: the invoice workflow's
+    completeness check then re-reads the page's table regions at full resolution.
+    """
     options = dict(url=settings.NANONETS_BASE_URL, model=model,
                    api_key=settings.NANONETS_API_KEY,
                    timeout=settings.NANONETS_TIMEOUT_SECONDS,
@@ -57,7 +62,15 @@ def _recognize_complete(image: bytes, *, page_number: int, model: str) -> tuple[
             }}
             return result, artifact
         earlier.append({"image_max_edge": max_edge, "response": result})
-    raise OcrError(f"Page {page_number} OCR was truncated after lower-resolution retries")
+    logger.error("OCR page %s is still truncated after lower-resolution retries; keeping the "
+                 "longest output for targeted table OCR and human review", page_number)
+    best = max(earlier, key=lambda attempt: len(attempt["response"]["choices"][0]["message"]["content"]))
+    artifact = {**best["response"], "_ocr_retry": {
+        "selected_image_max_edge": best["image_max_edge"],
+        "all_truncated": True,
+        "earlier_attempts": earlier,
+    }}
+    return best["response"], artifact
 
 
 def submit_job(preprocessing_job):

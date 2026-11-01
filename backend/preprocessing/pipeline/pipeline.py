@@ -1,4 +1,4 @@
-"""Layer 1 orchestration: render -> quality check -> denoise -> deskew.
+"""Layer 1 orchestration: render -> quality check -> denoise -> deskew -> contrast.
 
 Denoising runs before deskewing, as the paper prescribes (Section 5): the skew
 angle is measured from Otsu-binarised text pixels, and noise specks would
@@ -18,12 +18,13 @@ from typing import Any, Iterator
 
 import numpy as np
 
+from .contrast import enhance_contrast
 from .config import DENOISER_NONE, SIGMA_MODE_FIXED, PreprocessingConfig
 from .deskew import deskew
 from .denoising import denoise
 from .imaging import color_mode_of, to_float, to_gray, to_uint8, validate_image
 from .pdf_renderer import render_pdf
-from .quality import QualityReport, assess_quality, is_effectively_grayscale
+from .quality import FLAG_LOW_CONTRAST, QualityReport, assess_quality, is_effectively_grayscale
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,7 @@ class PageResult:
     quality_before: QualityReport
     quality_after: QualityReport
     timings_ms: dict[str, float] = field(default_factory=dict)
+    contrast_enhanced: bool = False
 
     def metadata(self) -> dict[str, Any]:
         """Everything except the pixel data, as JSON-serialisable values."""
@@ -79,6 +81,7 @@ class PageResult:
             "quality_before": self.quality_before.to_dict(),
             "quality_after": self.quality_after.to_dict(),
             "timings_ms": self.timings_ms,
+            "contrast_enhanced": self.contrast_enhanced,
         }
 
 
@@ -156,6 +159,13 @@ def preprocess_image(
         deskew_skip = None if result.rotated else SKIP_ANGLE_BELOW_THRESHOLD
     timed("deskew", start)
 
+    contrast_enhanced = (config.contrast_enhancement and not quality_before.is_blank
+                         and FLAG_LOW_CONTRAST in quality_before.flags)
+    if contrast_enhanced:
+        start = time.perf_counter()
+        work = enhance_contrast(work, config.clahe_clip_limit, config.clahe_tile_grid)
+        timed("contrast", start)
+
     start = time.perf_counter()
     quality_after = assess_quality(work, dpi, config)
     timed("quality_after", start)
@@ -179,6 +189,7 @@ def preprocess_image(
         quality_before=quality_before,
         quality_after=quality_after,
         timings_ms=timings,
+        contrast_enhanced=contrast_enhanced,
     )
 
 

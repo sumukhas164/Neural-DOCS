@@ -18,8 +18,10 @@ Read the file that matches your task before writing code.
 ## Ground rules
 
 1. **Build layer by layer.** Inspect, test, and document each stage. Current
-   state: preprocessing, OCR integration, an invoice workflow, and a React
-   review interface exist; accuracy evaluation and production hardening remain.
+   state: preprocessing, OCR integration, an invoice workflow with
+   line-item completeness checks and targeted table OCR, an evaluation
+   command, and a React review interface exist; measured accuracy on verified
+   invoices and production hardening remain.
 2. **The paper and the architecture diagram are the specification.** When
    something is needed that neither covers, implement the smallest reasonable
    thing, mark it in code as an "engineering default", and record it in
@@ -38,6 +40,15 @@ Read the file that matches your task before writing code.
    measured on this codebase; update them when behaviour changes.
 7. **Update these files in the same change** that alters behaviour, structure,
    configuration or limitations.
+
+8. **Never drop or overwrite an invoice row silently.** Every OCR table row
+   must end up as an extracted row or a recorded disposition. Uncertain
+   values stay empty with a flagged suggestion; disagreements between
+   extraction methods, the judge, or totals are flagged for a reviewer, never
+   resolved automatically. Unresolved completeness warnings block
+   auto-approval.
+9. **Accuracy claims need `evaluate_extraction` results** on manually
+   verified invoices, recorded in `07-configuration-and-testing.md`.
 
 ## Source documents
 

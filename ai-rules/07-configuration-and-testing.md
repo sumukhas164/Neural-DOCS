@@ -26,6 +26,11 @@
 | `NANONETS_MODEL` | `nanonets/Nanonets-OCR2-3B` | vLLM served model ID |
 | `NANONETS_TIMEOUT_SECONDS` | `1800` | Overall page OCR timeout, including gateway polling |
 | `NANONETS_MAX_TOKENS` | `8192` | Maximum model response tokens |
+| `INVOICE_CONFIDENCE_THRESHOLD` | `80` | 0-100; invoice runs scoring below it go to human review |
+| `INVOICE_RETRY_MAX_PAGES` | `3` | Pages per invoice run that may get targeted table OCR (0 disables) |
+| `INVOICE_RETRY_MAX_CALLS` | `12` | Gateway calls per invoice run for targeted table OCR |
+| `INVOICE_RETRY_BAND_HEIGHT` | `1400` | Maximum crop height in processed-page pixels |
+| `INVOICE_RETRY_BAND_OVERLAP` | `160` | Overlap between consecutive crops, pixels |
 
 `settings.PREPROCESSING` is a dict of overrides for `PreprocessingConfig`.
 Any field can be set there in code; only the six above have environment
@@ -62,6 +67,9 @@ means an engineering default that the paper does not specify.
 | `min_brightness`, `max_brightness` | 0.25, 0.98 | eng | `too_dark`, `overexposed` flags |
 | `blank_ink_ratio` | 0.0005 | eng | `blank_page` flag |
 | `grayscale_chroma_threshold` | 0.02 | eng | Below this a page is treated as grayscale |
+| `contrast_enhancement` | True | eng | CLAHE on pages flagged `low_contrast` only; never binarises |
+| `clahe_clip_limit` | 2.0 | eng | CLAHE clip limit, 1-4 |
+| `clahe_tile_grid` | 8 | eng | CLAHE tiles per side |
 
 ## Running things
 
@@ -72,6 +80,9 @@ without Celery does not launch Django.
 ```powershell
 # Layer 1 on a file, no database needed
 .\.venv\Scripts\python.exe manage.py preprocess_pdf scan.pdf --output-dir out [--denoiser tv] [--sigma-mode fixed --fixed-sigma 0.1] [--dpi 200] [--max-pages 3] [--no-deskew] [--save-original]
+
+# Line-item accuracy against manually verified invoices (see 09-invoice-workflow.md)
+.\.venv\Scripts\python.exe manage.py evaluate_extraction ground_truth\ --output eval_output\extraction.json
 
 # The paper's benchmark on a folder of clean scans
 .\.venv\Scripts\python.exe manage.py evaluate_denoisers clean_scans/ --output eval_output/results.csv [--algorithms drunet tv] [--sigmas 0.05 0.1 0.2] [--size 512] [--no-lpips]
@@ -123,13 +134,19 @@ against MySQL instead.
 | `test_services.py` | 9 | Settings-driven config, job creation, stored files and metadata, idempotent start, failure recording, Celery task, on-commit dispatch, both management commands |
 | `documents/tests/test_api.py` | 15 | Authentication required, successful upload through to completed job, four kinds of invalid upload, size and page limits, per-user isolation, re-run with options, rejected options |
 | `ocr/tests/test_ocr.py` | varies | Gateway URL and key validation, OCR request/polling, OCR jobs |
-| `invoices/tests/test_pipeline.py` | varies | Extraction, validation, judge workflow, review API |
+| `invoices/tests/test_pipeline.py` | 11 | Extraction, validation, judge, confidence routing, completeness + targeted retry loop with a mocked gateway, retry limit, candidate accept/dismiss, finding resolution, approval rules, original image |
+| `invoices/tests/test_completeness.py` | 14 | Indian number formats and OCR confusions, multi-page continuation, 60-row dense table, wrapped descriptions, missing amounts, repeated rows, groups/subtotal/tax/discount/round-off/payment/total, merged-cell splitting, truncation, missing pages, serial gaps, untabled lines, crop disagreement, band merging, evaluation metrics |
+| `preprocessing/tests/test_tables_contrast.py` | 6 | Ruled table detection on clean, 2° skewed and half-resolution pages, no false table, crop bands, CLAHE keeps a 3-pixel decimal point |
 | `colab/test_gateway.py` | 1 | Gateway authentication, job polling, and model response flow |
 
 ### Latest verification
 
-The current backend suite passed with `129 passed, 10 deselected` using
-`-m "not models"` on Windows and SQLite. The gateway test passed separately.
+`pytest.ini` previously listed only `preprocessing/tests` and
+`documents/tests`, so a plain `pytest` skipped the OCR and invoice tests; it
+now includes `ocr/tests` and `invoices/tests`. After the completeness and
+targeted-retry changes, the backend suite passed with `166 passed, 10
+deselected` using `-m "not models"` on Windows and SQLite, and the React app
+built with Vite. The UI was not exercised in a browser. The gateway test passed separately.
 The ten pretrained-weight tests and a live Colab-to-Django invoice run were
 not rerun for this change. The earlier 138-test full run predates the OCR2-3B
 integration and does not verify it.

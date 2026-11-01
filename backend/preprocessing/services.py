@@ -82,6 +82,7 @@ def _save_page(job: PreprocessingJob, result: PageResult) -> PreprocessedPage:
         quality_after=result.quality_after.to_dict(),
         quality_flags=list(result.quality_before.flags),
         timings_ms=result.timings_ms,
+        contrast_enhanced=result.contrast_enhanced,
     )
     page.original_image.save(
         f"{stem}_original.png", ContentFile(_encode_png(result.original)), save=False

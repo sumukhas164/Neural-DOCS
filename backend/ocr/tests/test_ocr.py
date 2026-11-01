@@ -109,16 +109,20 @@ def test_truncated_page_retries_at_lower_resolution_and_keeps_raw_attempts():
     assert artifact["_ocr_retry"]["selected_image_max_edge"] == 2600
 
 
-def test_truncated_page_fails_if_all_resolutions_are_truncated():
+def test_all_truncated_attempts_keep_longest_output_for_review():
     image = Image.new("RGB", (800, 3000), "white")
     buffer = BytesIO()
     image.save(buffer, format="PNG")
-    truncated = {"choices": [{"message": {"content": "partial"}, "finish_reason": "length"}]}
+    first = {"choices": [{"message": {"content": "partial rows 1-40"}, "finish_reason": "length"}]}
+    shorter = {"choices": [{"message": {"content": "rows 1-9"}, "finish_reason": "length"}]}
 
-    with patch("ocr.services.recognize", return_value=truncated) as recognize_call:
-        with pytest.raises(OcrError, match="Page 3 OCR was truncated"):
-            _recognize_complete(buffer.getvalue(), page_number=3, model="ocr2")
+    with patch("ocr.services.recognize", side_effect=[first, shorter, shorter]) as recognize_call:
+        result, artifact = _recognize_complete(buffer.getvalue(), page_number=3, model="ocr2")
     assert recognize_call.call_count == 3
+    assert result == first and result["choices"][0]["finish_reason"] == "length"
+    assert artifact["_ocr_retry"]["all_truncated"] is True
+    assert artifact["_ocr_retry"]["selected_image_max_edge"] is None
+    assert len(artifact["_ocr_retry"]["earlier_attempts"]) == 3
 
 
 @override_settings(NANONETS_BASE_URL="http://127.0.0.1:8090/v1", NANONETS_API_KEY="")

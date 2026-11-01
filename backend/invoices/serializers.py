@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import (BillingGroup, InvoiceRun, JudgeFinding, LineItem,
+from .models import (BillingGroup, InvoiceRun, JudgeFinding, LineItem, OcrRetryAttempt,
                      ReviewEvent, StageEvent, ValidationFinding)
 
 
@@ -15,15 +15,16 @@ class ItemSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = LineItem
-        fields = ["stable_id", "group_id", "page_number", "row_order", "kind", "name",
-                  "quantity", "unit_rate", "gross_amount", "discount", "net_amount",
-                  "relationship", "source_text"]
+        fields = ["stable_id", "group_id", "page_number", "table_number", "row_order", "serial", "kind", "name",
+                  "quantity", "unit_rate", "gross_amount", "discount", "net_amount", "tax_amounts",
+                  "relationship", "source_text", "extraction_method", "review_status", "flags"]
 
 
 class FindingSerializer(serializers.ModelSerializer):
     class Meta:
         model = ValidationFinding
-        fields = ["code", "severity", "target_id", "message", "evidence"]
+        fields = ["id", "category", "code", "severity", "target_id", "message", "evidence",
+                  "resolved", "resolution_note"]
 
 
 class JudgeSerializer(serializers.ModelSerializer):
@@ -40,6 +41,14 @@ class ReviewEventSerializer(serializers.ModelSerializer):
         fields = ["actor", "action", "target_id", "before", "after", "note", "created_at"]
 
 
+class RetryAttemptSerializer(serializers.ModelSerializer):
+    """Raw responses stay in the database for audit; the API returns the readable text."""
+
+    class Meta:
+        model = OcrRetryAttempt
+        fields = ["page_number", "region", "coverage", "reasons", "status", "text", "error", "created_at"]
+
+
 class StageEventSerializer(serializers.ModelSerializer):
     class Meta:
         model = StageEvent
@@ -54,6 +63,8 @@ class InvoiceRunSerializer(serializers.ModelSerializer):
     judge_findings = JudgeSerializer(many=True, read_only=True)
     review_events = ReviewEventSerializer(many=True, read_only=True)
     stage_events = StageEventSerializer(many=True, read_only=True)
+    retry_attempts = RetryAttemptSerializer(many=True, read_only=True)
+    ocr_job_pages = serializers.IntegerField(source="ocr_job.preprocessing_job.pages_total", read_only=True)
 
     def get_structured_items(self, run):
         group_names = {group.pk: group.name for group in run.groups.all()}
@@ -68,14 +79,21 @@ class InvoiceRunSerializer(serializers.ModelSerializer):
                 "qty": str(item.quantity) if item.quantity is not None else None,
                 "rate": str(item.unit_rate) if item.unit_rate is not None else None,
                 "amount": str(amount) if amount is not None else None,
+                "page_number": item.page_number,
+                "row_order": item.row_order,
+                "source_text": item.source_text,
+                "extraction_method": item.extraction_method,
+                "review_status": item.review_status,
             })
         return rows
 
     class Meta:
         model = InvoiceRun
         fields = ["id", "ocr_job", "status", "stage", "schema_version", "extraction", "original_extraction",
+                  "confidence_score", "confidence", "validation_summary", "ocr_job_pages",
                   "error_message", "created_at", "started_at", "finished_at",
-                  "groups", "items", "structured_items", "findings", "judge_findings", "review_events", "stage_events"]
+                  "groups", "items", "structured_items", "findings", "judge_findings", "review_events", "stage_events",
+                  "retry_attempts"]
 
 
 class ItemCorrectionSerializer(serializers.Serializer):

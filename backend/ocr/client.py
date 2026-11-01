@@ -11,7 +11,19 @@ from uuid import UUID
 OCR_PROMPT = (
     "Extract all visible text from this medical invoice in reading order. "
     "Keep section headings and row order. Return tables as HTML tables. "
-    "Preserve amounts and labels exactly as shown. Do not infer missing text."
+    "Use one <tr> for every printed table row; never combine two charges in one row. "
+    "Keep empty cells as empty <td></td>. Keep a description that wraps onto a second line "
+    "in the same cell. Transcribe every row, including rows without an amount. "
+    "Preserve amounts, decimal points, minus signs and labels exactly as shown. "
+    "Do not infer missing text."
+)
+
+TABLE_PROMPT = (
+    "This image is a cropped part of a medical invoice table. Transcribe it as one HTML table. "
+    "Include the column header row if it is visible. Use one <tr> for every printed row, in order, "
+    "including section headings, subtotals and rows without an amount. Never combine two charges "
+    "in one row. Keep empty cells empty. Copy numbers exactly as printed. Do not infer text that "
+    "is cut off at the image edge."
 )
 
 

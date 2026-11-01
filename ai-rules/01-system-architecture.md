@@ -62,9 +62,10 @@ Layer 3's job.
 | `Document` model and upload API | Minimal version implemented | Only what Layer 1 needs to receive a PDF |
 | Celery task for Layer 1 | Implemented as an integration point | Runs inline when no broker is configured |
 | MySQL | Configured | Apply new OCR and invoice migrations to the target database |
-| LangGraph invoice workflow | Implemented | OCR-to-review graph with persisted stage snapshots; no automatic resume yet |
+| LangGraph invoice workflow | Implemented | Reconstruction, completeness check, bounded targeted table-OCR retry loop, validation, judge, confidence; persisted stage snapshots; no automatic resume yet |
+| Line-item completeness and evaluation | Implemented baseline | Row accounting, completeness findings, candidate rows, `evaluate_extraction`; no verified invoice set yet |
 | Layer 2 OCR | Implemented | Nanonets OCR2-3B via Colab gateway and Cloudflare Tunnel; requires live invoice verification |
-| Extraction, validation, judge, review | Implemented baseline | Real invoice evaluation and hardening pending |
+| Extraction, validation, judge, confidence routing, review | Implemented baseline | Real invoice evaluation, score calibration and hardening pending |
 | React frontend | Implemented | Local Vite review interface |
 
 ## What was built outside Layer 1, and why
