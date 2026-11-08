@@ -179,6 +179,13 @@ NANONETS_API_KEY = os.environ.get("NANONETS_API_KEY", "").strip()
 NANONETS_MODEL = os.environ.get("NANONETS_MODEL", "nanonets/Nanonets-OCR2-3B")
 NANONETS_TIMEOUT_SECONDS = int(os.environ.get("NANONETS_TIMEOUT_SECONDS", "1800"))
 NANONETS_MAX_TOKENS = int(os.environ.get("NANONETS_MAX_TOKENS", "8192"))
+# "strips": OCR each page as full-resolution strips cut at blank rows (dense
+# invoice pages read whole exceed the model's output budget and lose rows).
+# "page": one call per page with downscaled retries (previous behaviour).
+OCR_PAGE_MODE = os.environ.get("OCR_PAGE_MODE", "strips")
+OCR_STRIP_HEIGHT = int(os.environ.get("OCR_STRIP_HEIGHT", "1200"))
+if OCR_PAGE_MODE not in ("strips", "page") or OCR_STRIP_HEIGHT < 600:
+    raise ImproperlyConfigured("OCR_PAGE_MODE must be 'strips' or 'page'; OCR_STRIP_HEIGHT at least 600")
 
 # Invoice runs scoring below this (0-100) go to human review.
 INVOICE_CONFIDENCE_THRESHOLD = int(os.environ.get("INVOICE_CONFIDENCE_THRESHOLD", "80"))

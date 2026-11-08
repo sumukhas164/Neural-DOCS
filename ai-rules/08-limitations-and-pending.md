@@ -85,6 +85,8 @@
 | Unresolved completeness warnings always force human review | Owner's instruction: uncertain row coverage must not be auto-approved |
 | CLAHE on low-contrast pages, never binarisation | Not in the paper; binarisation can erase decimal points and minus signs |
 | Targeted OCR results are compared, never merged automatically | Owner's instruction: disagreements go to a reviewer |
+| Pages are OCR'd as full-resolution strips by default | Whole dense pages exceeded the model's output budget and downscaled retries lost rows |
+| Totals and sections are found by arithmetic, labels are only hints | Owner's instruction: other templates will not use the same words |
 
 ## Not verified
 
@@ -137,6 +139,10 @@
 - [ ] Measure whether CLAHE and full-resolution table crops change OCR
       accuracy on real low-contrast or dense bills.
 - [ ] Detect borderless tables for targeted OCR (currently full-width bands).
+- [ ] Run strip OCR end to end on the live gateway; measure calls, time and
+      row recall per page against page mode on verified bills.
+- [ ] Replace label patterns for tax/payment/discount lines with structural
+      evidence where possible (position after the item table, arithmetic).
 - [ ] Optional medical terminology assistance and look-alike medicine checks,
       always as flagged suggestions.
 - [ ] REST API: real authentication (tokens or sessions for the SPA), CORS,

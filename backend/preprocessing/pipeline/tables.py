@@ -86,5 +86,35 @@ def bands(region: Region, max_height: int, overlap: int) -> list[Region]:
         top = end - overlap
 
 
+def split_at_gaps(image: np.ndarray, max_height: int, search: float = 0.35,
+                  ink_threshold: int = 160) -> list[Region]:
+    """Cut a page into full-width strips no taller than ``max_height``.
+
+    Each cut is placed on the emptiest pixel row (blank space or a ruling
+    line) in the lower ``search`` fraction of the strip, so text lines and
+    table rows are not split between strips and no overlap is needed.
+    """
+    gray = to_gray(to_uint8(image))
+    height, width = gray.shape
+    ink = np.count_nonzero(gray < ink_threshold, axis=1).astype(np.float32)
+    # A ruling line is dark across most of the width: a safe place to cut.
+    cost = np.where(ink > 0.6 * width, 0.0, ink)
+    cost = np.convolve(cost, np.ones(7, np.float32), mode="same")  # avoid cutting just above descenders
+    regions, top = [], 0
+    while height - top > max_height:
+        low, high = top + int(max_height * (1 - search)), top + max_height
+        window = cost[low:high]
+        cut = low + len(window) - 1 - int(np.argmin(window[::-1]))  # latest emptiest row keeps strips large
+        regions.append(Region(0, top, width, cut - top))
+        top = cut
+    regions.append(Region(0, top, width, height - top))
+    return regions
+
+
+def ink_fraction(image: np.ndarray, ink_threshold: int = 160) -> float:
+    gray = to_gray(to_uint8(image))
+    return float(np.count_nonzero(gray < ink_threshold)) / max(gray.size, 1)
+
+
 def crop(image: np.ndarray, region: Region) -> np.ndarray:
     return image[region.y:region.y + region.height, region.x:region.x + region.width]

@@ -118,6 +118,8 @@ function Review({ run, refresh }) {
   const items = run.items || []
   const findings = run.findings || []
   const lineItems = items.filter(item => item.kind === 'item')
+  const sectionRows = items.filter(item => item.kind === 'item' || item.kind === 'subtotal')
+  const otherRows = items.filter(item => item.kind !== 'item' && item.kind !== 'subtotal')
   const groupNames = Object.fromEntries(groups.map(group => [group.stable_id, group.name]))
   const openFindings = findings.filter(finding => !finding.resolved && finding.severity !== 'info')
   const completeness = openFindings.filter(finding => finding.category === 'completeness')
@@ -160,8 +162,9 @@ function Review({ run, refresh }) {
     </section>
     <div className="review-columns"><div>
       <h3>Source rows and corrections</h3>
-      {groups.map(group => <div className="group" key={group.stable_id}><h4>{group.name} <small>page {group.page_number}</small></h4>{items.filter(item => item.group_id === group.stable_id).map(itemRow)}</div>)}
-      {items.filter(item => !item.group_id).length > 0 && <div className="group"><h4>Unassigned and totals</h4>{items.filter(item => !item.group_id).map(itemRow)}</div>}
+      {groups.filter(group => sectionRows.some(item => item.group_id === group.stable_id)).map(group => <div className="group" key={group.stable_id}><h4>{group.name} <small>page {group.page_number}</small></h4>{sectionRows.filter(item => item.group_id === group.stable_id).map(itemRow)}</div>)}
+      {sectionRows.filter(item => !item.group_id).length > 0 && <div className="group"><h4>Unassigned</h4>{sectionRows.filter(item => !item.group_id).map(itemRow)}</div>}
+      {otherRows.length > 0 && <details className="group other-rows"><summary>Totals, taxes, payments and summary lines ({otherRows.length}) — not counted as items</summary>{otherRows.map(itemRow)}</details>}
       {!items.length && <p className="empty">No item rows found. Review the OCR page before making a decision.</p>}
       <h3>Validation findings</h3>{findings.filter(finding => finding.category !== 'completeness').length ? findings.filter(finding => finding.category !== 'completeness').map(findingRow) : <p className="muted">No deterministic discrepancies found.</p>}
       {findings.some(finding => finding.category === 'completeness' && (finding.resolved || finding.severity === 'info')) && <details><summary>Resolved and informational completeness notes</summary>{findings.filter(finding => finding.category === 'completeness' && (finding.resolved || finding.severity === 'info')).map(findingRow)}</details>}

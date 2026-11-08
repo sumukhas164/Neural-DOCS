@@ -125,7 +125,7 @@ def test_all_truncated_attempts_keep_longest_output_for_review():
     assert len(artifact["_ocr_retry"]["earlier_attempts"]) == 3
 
 
-@override_settings(NANONETS_BASE_URL="http://127.0.0.1:8090/v1", NANONETS_API_KEY="")
+@override_settings(NANONETS_BASE_URL="http://127.0.0.1:8090/v1", NANONETS_API_KEY="", OCR_PAGE_MODE="page")
 @pytest.mark.django_db
 def test_ocr_job_keeps_raw_response_and_page_order(django_capture_on_commit_callbacks):
     user = get_user_model().objects.create_user("ocr_user", password="pw")

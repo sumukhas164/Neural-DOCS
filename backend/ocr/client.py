@@ -27,6 +27,25 @@ TABLE_PROMPT = (
 )
 
 
+STRIP_PROMPT = (
+    "This image is one horizontal strip of a medical invoice page, cut between text lines. "
+    "Extract all visible text in reading order. Return tables as HTML tables with one <tr> for "
+    "every printed row, including section headings, subtotals and rows without an amount. "
+    "Never combine two charges in one row. Keep empty cells as empty <td></td>. "
+    "Copy numbers, decimal points and minus signs exactly. Do not invent column headings "
+    "that are not printed in this strip and do not infer text cut off at the edges."
+)
+
+
+def strip_prompt(columns=None) -> str:
+    """Prompt for one page strip; ``columns`` are the headings of a table that continues into it."""
+    if not columns:
+        return STRIP_PROMPT
+    return (STRIP_PROMPT + " A table from the previous strip may continue here with these columns, "
+            f"in this order: {' | '.join(columns)}. Give each continuing row exactly {len(columns)} "
+            "cells in that order, leaving cells empty when nothing is printed.")
+
+
 class OcrError(RuntimeError):
     pass
 

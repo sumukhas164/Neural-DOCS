@@ -26,6 +26,8 @@
 | `NANONETS_MODEL` | `nanonets/Nanonets-OCR2-3B` | vLLM served model ID |
 | `NANONETS_TIMEOUT_SECONDS` | `1800` | Overall page OCR timeout, including gateway polling |
 | `NANONETS_MAX_TOKENS` | `8192` | Maximum model response tokens |
+| `OCR_PAGE_MODE` | `strips` | `strips`: full-resolution strips cut at blank rows; `page`: one call per page with downscaled retries |
+| `OCR_STRIP_HEIGHT` | `1200` | Maximum strip height in processed-page pixels (at least 600) |
 | `INVOICE_CONFIDENCE_THRESHOLD` | `80` | 0-100; invoice runs scoring below it go to human review |
 | `INVOICE_RETRY_MAX_PAGES` | `3` | Pages per invoice run that may get targeted table OCR (0 disables) |
 | `INVOICE_RETRY_MAX_CALLS` | `12` | Gateway calls per invoice run for targeted table OCR |
@@ -136,6 +138,8 @@ against MySQL instead.
 | `ocr/tests/test_ocr.py` | varies | Gateway URL and key validation, OCR request/polling, OCR jobs |
 | `invoices/tests/test_pipeline.py` | 11 | Extraction, validation, judge, confidence routing, completeness + targeted retry loop with a mocked gateway, retry limit, candidate accept/dismiss, finding resolution, approval rules, original image |
 | `invoices/tests/test_completeness.py` | 14 | Indian number formats and OCR confusions, multi-page continuation, 60-row dense table, wrapped descriptions, missing amounts, repeated rows, groups/subtotal/tax/discount/round-off/payment/total, merged-cell splitting, truncation, missing pages, serial gaps, untabled lines, crop disagreement, band merging, evaluation metrics |
+| `invoices/tests/test_layouts.py` | 13 | Summary + detail bill (summary table, receipts, totals block, grand total), colspan section totals, continuation page with an extra column, returns, split descriptions, invented header overruled, correct header kept, column inference evidence, totals with no "total" wording, sections from totals, short-section retry without invented rows, end-to-end run and API |
+| `ocr/tests/test_strips.py` | 7 | Cuts only through blank rows and cover the page, ruling-line cuts, header hint prompt, strip order and column carry-over, truncated-strip splitting and depth/height limits, OCR job in strip mode across pages |
 | `preprocessing/tests/test_tables_contrast.py` | 6 | Ruled table detection on clean, 2° skewed and half-resolution pages, no false table, crop bands, CLAHE keeps a 3-pixel decimal point |
 | `colab/test_gateway.py` | 1 | Gateway authentication, job polling, and model response flow |
 
@@ -143,12 +147,11 @@ against MySQL instead.
 
 `pytest.ini` previously listed only `preprocessing/tests` and
 `documents/tests`, so a plain `pytest` skipped the OCR and invoice tests; it
-now includes `ocr/tests` and `invoices/tests`. After the completeness and
-targeted-retry changes, the backend suite passed with `166 passed, 10
-deselected` using `-m "not models"` on Windows and SQLite, and the React app
-built with Vite. The UI was not exercised in a browser. The gateway test passed separately.
-The ten pretrained-weight tests and a live Colab-to-Django invoice run were
-not rerun for this change. The earlier 138-test full run predates the OCR2-3B
+now includes `ocr/tests` and `invoices/tests`. After the strip-OCR and layout
+changes: `186 passed, 10 deselected` with `-m "not models"`, the ten
+pretrained-weight tests passed (`-m models`), the Colab gateway test passed,
+and the React app built with Vite, on Windows and SQLite. The UI was not
+exercised in a browser, and strip OCR was not run against the live gateway. The earlier 138-test full run predates the OCR2-3B
 integration and does not verify it.
 
 ### Not covered by automated tests

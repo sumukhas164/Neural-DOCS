@@ -12,18 +12,20 @@ import re
 from collections import Counter
 from difflib import SequenceMatcher
 
-from .validation import money
+from .extraction import _base_name
+from .validation import TOLERANCE, money
 
 CATEGORY = "completeness"
 ROW_FLAG_SEVERITY = {
     "missing_amount": "review", "missing_description": "review", "unparsed": "review",
     "ambiguous_separator": "review", "ocr_char_confusion": "review", "too_many_decimals": "review",
     "split_from_merged_cell": "review", "merged_values": "review", "columns_unknown": "review",
-    "wrapped_description": "info",
+    "wrapped_description": "info", "columns_by_arithmetic": "info", "summary_of_detail": "info",
+    "footer_line": "info", "fragment_from_next_page": "review", "total_by_arithmetic": "info",
 }
 RETRY_CODES = {"ocr_truncated", "ocr_downscaled", "empty_ocr_page", "unclosed_table", "untabled_amount_lines",
                "no_rows_on_page", "serial_gap", "merged_values", "split_from_merged_cell", "columns_unknown",
-               "missing_grand_total"}
+               "missing_grand_total", "section_items_short"}
 NAME_MATCH_RATIO = 0.85  # engineering default for pairing the same row read twice
 
 
@@ -110,10 +112,13 @@ def check(invoice, pages, expected_pages, crops=None):
             "No grand total was found; the table may continue beyond what was read", page_number=last_page)
 
     _serial_checks(items, add)
+    _reconcile_sections(invoice, add, request)
 
     for row in invoice.get("items", []):
         for flag in row.get("flags", []):
             severity = ROW_FLAG_SEVERITY.get(flag["code"], "review")
+            if severity == "info":
+                continue  # context stays on the row; one finding per row would bury real warnings
             add(flag["code"], severity, row["id"], flag["message"], flag.get("raw") or row.get("source_text", ""),
                 page_number=row["page_number"])
 
@@ -131,6 +136,45 @@ def check(invoice, pages, expected_pages, crops=None):
     candidates = _compare(by_page, crops or {}, add)
     requests = [{"page_number": number, "reasons": sorted(codes)} for number, codes in sorted(retry.items())]
     return list(findings), requests, candidates
+
+
+def _reconcile_sections(invoice, add, request):
+    """Compare each section's item sum with its printed total and summary line.
+
+    A section whose items add up to less than what the bill prints for it is
+    the clearest sign that rows were not read. The printed amount is only
+    evidence: no row or amount is created from the difference.
+    """
+    rows = invoice.get("items", [])
+    names = {group["id"]: group["name"] for group in invoice.get("groups", [])}
+    members = {}
+    for row in rows:
+        if row.get("kind") == "item" and row.get("group_id"):
+            members.setdefault(row["group_id"], []).append(row)
+    by_base = {_base_name(name): gid for gid, name in names.items()}
+    printed = []  # (group id, printed amount, row that printed it)
+    for row in rows:
+        amount = row_amount(row)
+        if amount is None:
+            continue
+        if row.get("kind") == "subtotal" and row.get("group_id"):
+            printed.append((row["group_id"], amount, row))
+        elif row.get("kind") == "summary" and _base_name(row["name"]) in by_base:
+            printed.append((by_base[_base_name(row["name"])], amount, row))
+    for gid, expected, source in printed:
+        amounts = [row_amount(row) for row in members.get(gid, [])]
+        if any(amount is None for amount in amounts):
+            continue  # an unreadable amount is already flagged on its row
+        found = sum(amounts, money("0"))
+        if found + TOLERANCE >= expected:
+            continue
+        pages = sorted({row["page_number"] for row in members.get(gid, [])} | {source["page_number"]})
+        add("section_items_short", "review", source["id"],
+            f"Items read for '{names.get(gid, gid)}' add up to {found}; the bill prints {expected}. "
+            f"Rows worth {expected - found} may be missing on page(s) {', '.join(map(str, pages))}",
+            source.get("source_text", ""))
+        for number in pages:
+            request(number, "section_items_short")
 
 
 def _serial_checks(items, add):

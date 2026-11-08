@@ -1,7 +1,9 @@
 """Persist page-level OCR without discarding the server's raw response."""
 
+import html
 import json
 import logging
+import re
 from io import BytesIO
 from time import monotonic
 
@@ -9,11 +11,14 @@ from django.conf import settings
 from django.core.files.base import ContentFile
 from django.db import transaction
 from django.utils import timezone
+import cv2
+import numpy as np
 from PIL import Image
 
 from preprocessing.models import PreprocessingJob
+from preprocessing.pipeline.tables import Region, crop, ink_fraction, split_at_gaps
 
-from .client import OcrError, recognize
+from .client import OcrError, ask, recognize, strip_prompt
 from .models import OcrJob, OcrPage
 
 logger = logging.getLogger(__name__)
@@ -73,6 +78,78 @@ def _recognize_complete(image: bytes, *, page_number: int, model: str) -> tuple[
     return best["response"], artifact
 
 
+MIN_STRIP_HEIGHT = 300  # px; below this a truncated strip is not split further
+MAX_STRIP_SPLITS = 2
+BLANK_STRIP_INK = 0.0005  # fraction of dark pixels; emptier strips are not sent
+
+
+def _header_cells(text):
+    """Headings of the last table in ``text`` whose first row is a printed <th> header."""
+    columns = None
+    for table in re.findall(r"<table\b.*?(?:</table>|$)", text, flags=re.I | re.S):
+        first = re.search(r"<tr\b.*?</tr>", table, flags=re.I | re.S)
+        if not first or "<th" not in first.group().lower():
+            continue
+        cells = [" ".join(html.unescape(re.sub(r"<[^>]+>", " ", cell)).split())
+                 for cell in re.findall(r"<t[hd]\b[^>]*>(.*?)</t[hd]>", first.group(), flags=re.I | re.S)]
+        if sum(bool(re.search(r"[A-Za-z]{2}", cell)) for cell in cells) >= 2:
+            columns = cells
+    return columns
+
+
+def _encode_png(image):
+    ok, buffer = cv2.imencode(".png", image)
+    if not ok:
+        raise OcrError("PNG encoding of page strip failed")
+    return buffer.tobytes()
+
+
+def recognize_strips(image: bytes, *, page_number: int, model: str, columns=None):
+    """OCR a page as full-resolution horizontal strips cut at blank rows.
+
+    A dense page read whole exceeds the model's output budget and was being
+    downscaled, which loses rows. Strips keep full resolution and stay well
+    under the budget. A strip that is still truncated is split again, at most
+    MAX_STRIP_SPLITS times. Returns (combined response, raw artifact, columns
+    of the table that may continue onto the next page).
+    """
+    pixels = cv2.imdecode(np.frombuffer(image, np.uint8), cv2.IMREAD_UNCHANGED)
+    if pixels is None:
+        raise OcrError(f"Processed image for page {page_number} could not be decoded")
+    options = dict(url=settings.NANONETS_BASE_URL, model=model, api_key=settings.NANONETS_API_KEY,
+                   timeout=settings.NANONETS_TIMEOUT_SECONDS, max_tokens=settings.NANONETS_MAX_TOKENS)
+    texts, attempts, truncated = [], [], False
+
+    def read(region: Region, depth: int):
+        nonlocal columns, truncated
+        part = crop(pixels, region)
+        if ink_fraction(part) < BLANK_STRIP_INK:
+            attempts.append({"region": region.as_list(), "skipped": "blank"})
+            return
+        result = ask(_encode_png(part), strip_prompt(columns), **options)
+        attempts.append({"region": region.as_list(), "depth": depth, "columns_hint": columns, "response": result})
+        choice = result["choices"][0]
+        if choice.get("finish_reason") == "length" and depth < MAX_STRIP_SPLITS \
+                and region.height >= 2 * MIN_STRIP_HEIGHT:
+            logger.warning("OCR page %s strip %s was truncated; splitting it", page_number, region.as_list())
+            for sub in split_at_gaps(part, region.height // 2 + 1):
+                read(Region(region.x + sub.x, region.y + sub.y, sub.width, sub.height), depth + 1)
+            return
+        if choice.get("finish_reason") == "length":
+            truncated = True
+            logger.error("OCR page %s strip %s is still truncated; keeping its output for review",
+                         page_number, region.as_list())
+        texts.append(choice["message"]["content"])
+        columns = _header_cells(choice["message"]["content"]) or columns
+
+    for region in split_at_gaps(pixels, settings.OCR_STRIP_HEIGHT):
+        read(region, 0)
+    combined = {"model": model, "choices": [{"index": 0, "message": {"role": "assistant", "content": "\n\n".join(texts)},
+                                             "finish_reason": "length" if truncated else "stop"}]}
+    artifact = {**combined, "_ocr_strips": {"strip_height": settings.OCR_STRIP_HEIGHT, "attempts": attempts}}
+    return combined, artifact, columns
+
+
 def submit_job(preprocessing_job):
     if preprocessing_job.status != PreprocessingJob.Status.COMPLETED:
         raise ValueError("Preprocessing must complete before OCR")
@@ -96,6 +173,7 @@ def run_job(job_id):
     try:
         if job.preprocessing_job.status != PreprocessingJob.Status.COMPLETED:
             raise OcrError("Source preprocessing job is not completed")
+        columns = None  # headings of a table that may continue onto the next page
         for page in job.preprocessing_job.pages.order_by("page_number"):
             page_started = monotonic()
             logger.info("OCR job %s processing page %s of %s", job_id, page.page_number,
@@ -104,8 +182,13 @@ def run_job(job_id):
                 OcrPage.objects.create(job=job, source_page=page, page_number=page.page_number)
             else:
                 with page.processed_image.open("rb") as handle:
-                    result, artifact = _recognize_complete(
-                        handle.read(), page_number=page.page_number, model=job.model_name)
+                    image = handle.read()
+                if settings.OCR_PAGE_MODE == "strips":
+                    result, artifact, columns = recognize_strips(
+                        image, page_number=page.page_number, model=job.model_name, columns=columns)
+                else:
+                    result, artifact = _recognize_complete(image, page_number=page.page_number,
+                                                           model=job.model_name)
                 choice = result["choices"][0]
                 ocr_page = OcrPage(job=job, source_page=page, page_number=page.page_number,
                                    text=choice["message"]["content"],

@@ -44,6 +44,7 @@ def validate(invoice, summary=None):
         add("schema_version", "error", "invoice", "Unexpected extraction schema version")
     groups = {group["id"] for group in invoice.get("groups", [])}
     seen = set()
+    continued = set()
     group_rows = defaultdict(list)
     group_subtotals = defaultdict(list)
     for row in invoice.get("items", []):
@@ -53,8 +54,11 @@ def validate(invoice, summary=None):
             add("unknown_group", "error", rid, "Row references a missing billing group", row.get("source_text"))
         if row.get("kind") == "item" and not gid:
             add("unassigned_group", "review", rid, "Billing group is uncertain", row.get("source_text"))
-        if row.get("relationship") == "inferred_cross_page":
-            add("cross_page_group", "review", rid, "Group assignment continues from an earlier page", row.get("source_text"))
+        if row.get("relationship") in ("inferred_cross_page", "inferred_from_section_total") \
+                and (gid, row.get("page_number")) not in continued:
+            # Continuing a section across a page break is normal; noted once per section and page.
+            continued.add((gid, row.get("page_number")))
+            add("cross_page_group", "info", rid, "Group assignment continues from an earlier page", row.get("source_text"))
         if row.get("kind") == "item":
             # Repeated descriptions are normal (e.g. daily room rent); only an
             # identical row, including its printed source text, is suspicious.
@@ -103,6 +107,9 @@ def _line_checks(row, rid, add, count):
             add("invalid_number", "error", rid, f"Invalid {key}", row.get("source_text"))
     if qty is not None and rate is not None and (gross is not None or (net is not None and discount is None and not taxes)):
         expected = (qty * rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        printed = gross if gross is not None else net
+        if expected > 0 and printed < 0:
+            expected = -expected  # a return prints negative quantity and rate with a negative amount
         if gross is not None and abs(expected - gross) > TOLERANCE:
             count("line_quantity_rate", "failed")
             add("line_gross_mismatch", "error", rid, f"Quantity × rate is {expected}; OCR gross is {gross}", row.get("source_text"))

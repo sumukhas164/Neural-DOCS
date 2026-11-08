@@ -49,6 +49,7 @@ class LineItem(models.Model):
         DISCOUNT = "discount", "Discount"
         PAYMENT = "payment", "Payment"
         ADJUSTMENT = "adjustment", "Adjustment"
+        SUMMARY = "summary", "Summary line"
 
     class ReviewStatus(models.TextChoices):
         AUTO_EXTRACTED = "auto_extracted", "Automatically extracted"

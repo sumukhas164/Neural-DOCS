@@ -138,6 +138,11 @@ Invoice review endpoints (all additive; earlier fields are unchanged):
 | `POST /api/invoices/runs/<id>/decision/` | Approve (no unresolved error findings, item rows present) or keep for review |
 | `GET /api/invoices/runs/<id>/pages/<n>/image/` | Processed page PNG; `?variant=original` for the original render |
 
+Line item `kind` also takes `summary` (a restated amount kept for
+reference, never counted). OCR page artifacts written in strip mode hold
+`_ocr_strips: {strip_height, attempts: [{region, depth, columns_hint, response}
+| {region, skipped}]}`.
+
 New invoice tables: `invoices_ocrretryattempt` (one row per targeted OCR
 call, with the full raw response). `invoices_lineitem` and
 `invoices_validationfinding` gained the columns listed above.
